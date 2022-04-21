@@ -36,7 +36,7 @@ class UserFeature:
 
 
 def __mean(v):
-    return torch.mean(v).item if isinstance(v, torch.Tensor) else v
+    return torch.mean(v).item() if isinstance(v, torch.Tensor) else v
 
 
 def calculate_for_feature(group: UserFeature, metrics: list, logits: torch.Tensor, targets=None,
@@ -66,7 +66,7 @@ def calculate_for_feature(group: UserFeature, metrics: list, logits: torch.Tenso
 
     pairs = list(itertools.combinations(group.unique_labels, 2))
     for a, b in pairs:
-        results[f"{group.name}_{a}-{b}"] = {m: __mean(results[f"{group.name}_{a}"][m]) -
-                                               __mean(results[f"{group.name}_{b}"][m])
+        results[f"{group.name}_{a}-{b}"] = {m: (__mean(results[f"{group.name}_{a}"][m]) -
+                                               __mean(results[f"{group.name}_{b}"][m]))
                                             for m in metrics}
     return results

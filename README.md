@@ -63,7 +63,7 @@ To do so, you first need to specify which feature belongs to which user via the
 ```py
 from rmet import UserFeature, calculate_for_feature
 ug_gender = UserFeature("gender", ["m", "m", "f", "d", "m"])
-calculate_for_group(ug_gender, ["ndcg", "recall_k"], model_output, targets, k=10)
+calculate_for_feature(ug_gender, ["ndcg", "recall_k"], model_output, targets, k=10)
 ```
 
 Sample output:
