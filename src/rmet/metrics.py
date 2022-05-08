@@ -30,7 +30,7 @@ def ndcg(logits: torch.Tensor, targets: torch.Tensor, k=10):
     return dcg(logits, targets, k) / normalization
 
 
-def precision_k(logits: torch.Tensor, targets: torch.Tensor, k=10):
+def precision(logits: torch.Tensor, targets: torch.Tensor, k=10):
     """
     Computes the Precision@k (P@k) for items.
     In short, this is the proportion of relevant items in the retrieved items.
@@ -47,7 +47,7 @@ def precision_k(logits: torch.Tensor, targets: torch.Tensor, k=10):
     return n_relevant_items / k
 
 
-def recall_k(logits: torch.Tensor, targets: torch.Tensor, k=10):
+def recall(logits: torch.Tensor, targets: torch.Tensor, k=10):
     """
     Computes the Recall@k (R@k) for items.
     In short, this is the proportion of relevant retrieved items of all relevant items.
@@ -68,7 +68,7 @@ def recall_k(logits: torch.Tensor, targets: torch.Tensor, k=10):
     return recall
 
 
-def f_score_k(logits: torch.Tensor, targets: torch.Tensor, k=10):
+def f_score(logits: torch.Tensor, targets: torch.Tensor, k=10):
     """
     Computes the F-score@k (F@k) for items.
     In short, this is the harmonic mena of precision@k and recall@k.
@@ -78,8 +78,8 @@ def f_score_k(logits: torch.Tensor, targets: torch.Tensor, k=10):
     :param k: top k items to consider
     """
 
-    p = precision_k(logits, targets, k)
-    r = recall_k(logits, targets, k)
+    p = precision(logits, targets, k)
+    r = recall(logits, targets, k)
 
     pr = p + r
     mask = pr != 0
@@ -88,7 +88,7 @@ def f_score_k(logits: torch.Tensor, targets: torch.Tensor, k=10):
     return f_score
 
 
-def hitrate_k(logits: torch.Tensor, targets: torch.Tensor, k=10):
+def hitrate(logits: torch.Tensor, targets: torch.Tensor, k=10):
     """
     Computes the Hitrate@k (HR@k) for items.
     In short, this is the proportion of relevant that could be recommended.
@@ -112,7 +112,7 @@ def hitrate_k(logits: torch.Tensor, targets: torch.Tensor, k=10):
     return recall
 
 
-def coverage_k(logits: torch.Tensor, k=10):
+def coverage(logits: torch.Tensor, k=10):
     """
     Computes the Coverage@k (Cov@k) for items.
     In short, this is the proportion of all items that are recommended to the users.
@@ -127,16 +127,16 @@ def coverage_k(logits: torch.Tensor, k=10):
 
 
 metric_fn_map_unary = {
-    "coverage_k": coverage_k
+    "coverage": coverage
 }
 
 metric_fn_map_bi = {
     "dcg": dcg,
     "ndcg": ndcg,
-    "recall_k": recall_k,
-    "precision_k": precision_k,
-    "hitrate_k": hitrate_k,
-    "f_score_k": f_score_k
+    "recall": recall,
+    "precision": precision,
+    "hitrate": hitrate,
+    "f_score": f_score
 }
 
 # List of metrics that are currently supported
