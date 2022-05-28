@@ -1,2 +1,3 @@
 from .metrics import *
-from .gap import UserFeature, calculate_for_feature
+from .gap import calculate_for_feature
+from .user_feature import UserFeature

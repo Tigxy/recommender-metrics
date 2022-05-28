@@ -1,38 +1,8 @@
 import torch
 import numpy as np
 import itertools
-from . import calculate
-
-
-class UserFeature:
-    def __init__(self, name: str, labels: list):
-        """
-        Splits users based on some arbitrary feature in different groups. This is used
-        to ease calculating differences of recommendation systems for users with different demographics, e.g., gender.
-
-        :param name: The name of the feature.
-        :param labels: The labels for the individual users of the feature. The users are grouped based on them.
-        """
-
-        self.name = name
-        self.labels = labels
-        self.unique_labels = set(labels)
-
-        # gather mapping for labels to indices
-        self.label_indices_map = {lbl: np.array([i for i, l in enumerate(self.labels) if l == lbl]) for lbl in labels}
-
-    def count(self):
-        return {k: len(v) for k, v in self.label_indices_map.items()}
-
-    def __repr__(self):
-        return str(self)
-
-    def __str__(self):
-        return f"UserFeatureGroup(name={self.name}, counts={self.count()})"
-
-    def __iter__(self):
-        for k, v in self.label_indices_map.items():
-            yield k, v
+from .metrics import calculate
+from .user_feature import UserFeature
 
 
 def __mean(v):
@@ -66,7 +36,7 @@ def calculate_for_feature(group: UserFeature, metrics: list, logits: torch.Tenso
 
     pairs = list(itertools.combinations(group.unique_labels, 2))
     for a, b in pairs:
-        results[f"{group.name}_{a}-{b}"] = {m: (__mean(results[f"{group.name}_{a}"][m]) -
-                                               __mean(results[f"{group.name}_{b}"][m]))
+        results[f"{group.name}_{a}-{b}"] = {m: (results[f"{group.name}_{a}"][m] -
+                                               results[f"{group.name}_{b}"][m])
                                             for m in metrics}
     return results
