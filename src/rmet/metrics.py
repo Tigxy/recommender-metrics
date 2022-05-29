@@ -1,3 +1,5 @@
+from collections import defaultdict
+from typing import Union
 import torch
 
 
@@ -145,7 +147,7 @@ metric_fn_map_bi = {
 supported_metrics = list(metric_fn_map_unary.keys()) + list(metric_fn_map_bi.keys())
 
 
-def calculate(metrics: list, logits: torch.Tensor, targets=None, k=10, return_individual=False):
+def _calculate(metrics: tuple, logits: torch.Tensor, targets=None, k=10, return_aggregated=True, return_individual=False):
     """
     Computes the values for a given list of metrics.
 
@@ -153,11 +155,12 @@ def calculate(metrics: list, logits: torch.Tensor, targets=None, k=10, return_in
     :param logits: prediction matrix about item relevance
     :param targets: 0/1 matrix encoding true item relevance, same shape as logits
     :param k: top k items to consider
-    :param return_individual: Whether the results for individual users also be returned
-    :return: A dictionary of {metric_name: values}.
-    In case 'return_individual=True', also {<metric_name>_individual: list_of_values} is returned.
+    :param return_aggregated: Whether aggregated metric results should be returned. 
+    :param return_individual: Whether the results for individual users should be returned
+    :return: a dictionary containing ...
+        {metric_name: value} if 'return_aggregated=True', and/or
+        {<metric_name>_individual: list_of_values} if return_individual=True'
     """
-
     if logits.shape[-1] < k:
         raise ValueError(f"'k' must not be greater than the number of items ({k} > {logits.shape[-1]})!")
 
@@ -174,10 +177,37 @@ def calculate(metrics: list, logits: torch.Tensor, targets=None, k=10, return_in
         else:
             raise ValueError(f"Metric '{metric}' not supported.")
 
-    results = {k: torch.mean(v).item() if isinstance(v, torch.Tensor) else v 
-               for k, v in raw_results.items()}
+    results = {}
+
+    if return_aggregated:
+        results.update({k: torch.mean(v).item() if isinstance(v, torch.Tensor) else v 
+                        for k, v in raw_results.items()})
 
     if return_individual:
         results.update({k + "_individual": v for k, v in raw_results.items()})
 
     return results
+
+
+def calculate(metrics: tuple, logits: torch.Tensor, targets=None, k: Union[int, list]=10, return_aggregated=True, return_individual=False):
+    """
+    Computes the values for a given list of metrics.
+
+    :param metrics: The list of metrics to compute. Check out 'supported_metrics' for a list of names.
+    :param logits: prediction matrix about item relevance
+    :param targets: 0/1 matrix encoding true item relevance, same shape as logits
+    :param k: top k items to consider
+    :param return_aggregated: Whether aggregated metric results should be returned. 
+    :param return_individual: Whether the results for individual users should be returned
+    :return: a dictionary containing ...
+        {metric_name: value} if 'return_aggregated=True', and/or
+        {<metric_name>_individual: list_of_values} if return_individual=True'
+    """
+    if isinstance(k, int):
+        return _calculate(metrics, logits, targets, k, return_aggregated=return_aggregated, return_individual=return_individual)
+
+    metric_results = defaultdict(lambda: dict())
+    for tk in k:
+        for metric, v in _calculate(metrics, logits, targets, tk, return_aggregated=return_aggregated, return_individual=return_individual).items():
+            metric_results[metric][tk] = v
+    return dict(metric_results)

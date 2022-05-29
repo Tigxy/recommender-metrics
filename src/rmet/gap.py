@@ -32,7 +32,7 @@ def calculate_for_feature(group: UserFeature, metrics: list, logits: torch.Tenso
     # calculate metrics for users of a single feature
     for lbl, indices in group:
         t = targets[indices] if targets is not None else None
-        results[f"{group.name}_{lbl}"] = calculate(metrics, logits[indices], t, k, return_individual)
+        results[f"{group.name}_{lbl}"] = calculate(metrics, logits[indices], t, k, return_individual=return_individual)
 
     pairs = list(itertools.combinations(group.unique_labels, 2))
     for a, b in pairs:
