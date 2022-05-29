@@ -11,6 +11,7 @@ def dcg(logits: torch.Tensor, targets: torch.Tensor, k=10):
     """
     top_indices = logits.topk(k, dim=-1).indices
     discount = 1 / torch.log2(torch.arange(1, k + 1) + 1)
+    discount = discount.to(device=logits.device)
     relevancy_scores = torch.gather(targets, dim=-1, index=top_indices)
     return relevancy_scores.float() @ discount
 
@@ -27,6 +28,7 @@ def ndcg(logits: torch.Tensor, targets: torch.Tensor, k=10):
         raise ValueError("k is required to be positive!")
 
     normalization = dcg(torch.ones(k), torch.ones(k), k)
+    normalization = normalization.to(device=logits.device)
     return dcg(logits, targets, k) / normalization
 
 
@@ -62,7 +64,7 @@ def recall(logits: torch.Tensor, targets: torch.Tensor, k=10):
 
     # may happen that there are no relevant true items, cover this possible DivisionByZero case.
     mask = n_total_relevant != 0
-    recall = torch.zeros_like(n_relevant_items, dtype=torch.float)
+    recall = torch.zeros_like(n_relevant_items, dtype=torch.float, device=logits.device)
     recall[mask] = n_relevant_items[mask] / n_total_relevant[mask]
 
     return recall
@@ -83,7 +85,7 @@ def f_score(logits: torch.Tensor, targets: torch.Tensor, k=10):
 
     pr = p + r
     mask = pr != 0
-    f_score = torch.zeros_like(r, dtype=torch.float)
+    f_score = torch.zeros_like(r, dtype=torch.float, device=logits.device)
     f_score[mask] = 2 * ((p * r)[mask] / pr[mask])
     return f_score
 
@@ -106,7 +108,7 @@ def hitrate(logits: torch.Tensor, targets: torch.Tensor, k=10):
 
     # may happen that there are no relevant true items, therefore we need to cover this possible DivisionByZero case.
     mask = denominator != 0
-    recall = torch.zeros_like(denominator, dtype=torch.float)
+    recall = torch.zeros_like(denominator, dtype=torch.float, device=logits.device)
     recall[mask] = n_relevant_items[mask] / denominator[mask]
 
     return recall
