@@ -13,7 +13,7 @@ class UserFeature:
 
         self.name = name
         self.labels = labels
-        self.unique_labels = set(labels)
+        self.unique_labels = set(sorted(set(labels)))
 
         self.label_map = {lbl: i for i, lbl in enumerate(self.unique_labels)}
         self.label_encodings = np.array([self.label_map[lbl] for lbl in labels], dtype=int)
