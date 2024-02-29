@@ -1,5 +1,5 @@
 import torch
-from typing import Union
+from typing import Iterable
 from enum import StrEnum, auto
 from collections import defaultdict
 
@@ -12,6 +12,9 @@ class MetricEnum(StrEnum):
     F_Score = auto()
     Hitrate = auto()
     Coverage = auto()
+
+    def __str__(self):
+        return self.value
 
 
 def dcg(logits: torch.Tensor, targets: torch.Tensor, k=10):
@@ -29,7 +32,7 @@ def dcg(logits: torch.Tensor, targets: torch.Tensor, k=10):
     return relevancy_scores.float() @ discount
 
 
-def ndcg(logits: torch.Tensor, targets: torch.Tensor, k=10):
+def ndcg(logits: torch.Tensor, targets: torch.Tensor, k: int = 10):
     """
     Computes the Normalized Discounted Cumulative Gain (nDCG) for items.
 
@@ -45,7 +48,7 @@ def ndcg(logits: torch.Tensor, targets: torch.Tensor, k=10):
     return dcg(logits, targets, k) / normalization
 
 
-def precision(logits: torch.Tensor, targets: torch.Tensor, k=10):
+def precision(logits: torch.Tensor, targets: torch.Tensor, k: int = 10):
     """
     Computes the Precision@k (P@k) for items.
     In short, this is the proportion of relevant items in the retrieved items.
@@ -62,7 +65,7 @@ def precision(logits: torch.Tensor, targets: torch.Tensor, k=10):
     return n_relevant_items / k
 
 
-def recall(logits: torch.Tensor, targets: torch.Tensor, k=10):
+def recall(logits: torch.Tensor, targets: torch.Tensor, k: int = 10):
     """
     Computes the Recall@k (R@k) for items.
     In short, this is the proportion of relevant retrieved items of all relevant items.
@@ -83,7 +86,7 @@ def recall(logits: torch.Tensor, targets: torch.Tensor, k=10):
     return recall
 
 
-def f_score(logits: torch.Tensor, targets: torch.Tensor, k=10):
+def f_score(logits: torch.Tensor, targets: torch.Tensor, k: int = 10):
     """
     Computes the F-score@k (F@k) for items.
     In short, this is the harmonic mena of precision@k and recall@k.
@@ -103,7 +106,7 @@ def f_score(logits: torch.Tensor, targets: torch.Tensor, k=10):
     return f_score
 
 
-def hitrate(logits: torch.Tensor, targets: torch.Tensor, k=10):
+def hitrate(logits: torch.Tensor, targets: torch.Tensor, k: int = 10):
     """
     Computes the Hitrate@k (HR@k) for items.
     In short, this is the proportion of relevant that could be recommended.
@@ -127,7 +130,7 @@ def hitrate(logits: torch.Tensor, targets: torch.Tensor, k=10):
     return recall
 
 
-def coverage(logits: torch.Tensor, k=10):
+def coverage(logits: torch.Tensor, k: int = 10):
     """
     Computes the Coverage@k (Cov@k) for items.
     In short, this is the proportion of all items that are recommended to the users.
@@ -158,8 +161,8 @@ metric_fn_map_bi = {
 supported_metrics = tuple(MetricEnum)
 
 
-def _calculate(metrics: tuple[str | MetricEnum], logits: torch.Tensor, targets=None, k=10, return_aggregated=True,
-               return_individual=False):
+def _calculate(metrics: Iterable[str | MetricEnum], logits: torch.Tensor, targets: torch.Tensor = None, k: int = 10,
+               return_aggregated: bool = True, return_individual: bool = False):
     """
     Computes the values for a given list of metrics.
 
@@ -181,20 +184,18 @@ def _calculate(metrics: tuple[str | MetricEnum], logits: torch.Tensor, targets=N
 
     raw_results = {}
     for metric in metrics:
-        metric_name = metric.value if isinstance(metric, MetricEnum) else metric
         if metric in metric_fn_map_unary:
-            raw_results[metric_name] = metric_fn_map_unary[metric](logits, k)
+            raw_results[str(metric)] = metric_fn_map_unary[metric](logits, k)
 
         elif metric in metric_fn_map_bi:
             if targets is None:
                 raise ValueError(f"'targets' is required to calculate '{metric}'!")
-            raw_results[metric_name] = metric_fn_map_bi[metric](logits, targets, k)
+            raw_results[str(metric)] = metric_fn_map_bi[metric](logits, targets, k)
 
         else:
             raise ValueError(f"Metric '{metric}' not supported.")
 
     results = {}
-
     if return_aggregated:
         results.update({k: torch.mean(v).item() if isinstance(v, torch.Tensor) else v
                         for k, v in raw_results.items()})
@@ -205,9 +206,9 @@ def _calculate(metrics: tuple[str | MetricEnum], logits: torch.Tensor, targets=N
     return results
 
 
-def calculate(metrics: tuple, logits: torch.Tensor, targets=None, k: Union[int, list] = 10,
-              return_aggregated: bool = True, return_individual: bool = False,
-              flatten_results: bool = False, flattened_results_prefix: str = ""):
+def calculate(metrics: Iterable[str | MetricEnum], logits: torch.Tensor, targets: torch.Tensor = None,
+              k: int | Iterable[int] = 10, return_aggregated: bool = True, return_individual: bool = False,
+              flatten_results: bool = False, flattened_parts_separator: str = "/", flattened_results_prefix: str = ""):
     """
     Computes the values for a given list of metrics.
 
@@ -217,26 +218,27 @@ def calculate(metrics: tuple, logits: torch.Tensor, targets=None, k: Union[int, 
     :param k: top k items to consider
     :param return_aggregated: Whether aggregated metric results should be returned. 
     :param return_individual: Whether the results for individual users should be returned
-    :param flatten_results: Whether to flatten the results' dictionary. Key is of format "{prefix}{metric}@{k}"
+    :param flatten_results: Whether to flatten the results' dictionary.
+                            Key is of format "{prefix}/{metric}@{k}" for separator "/"
+    :param flattened_parts_separator: How to separate the individual parts of the flattened key
     :param flattened_results_prefix: Prefix to prepend to the flattened results key.
     :return: a dictionary containing ...
         {metric_name: value} if 'return_aggregated=True', and/or
-        {<metric_name>_individual: list_of_values} if return_individual=True'
+        {<metric_name>_individual: list_of_values} if 'return_individual=True'
     """
     if logits.shape != targets.shape:
         raise ValueError(f"Logits and targets must be of same shape ({logits.shape} != {targets.shape})")
 
-    if isinstance(k, int):
-        return _calculate(metrics, logits, targets, k, return_aggregated=return_aggregated,
-                          return_individual=return_individual)
+    full_prefix = f"{flattened_results_prefix}{flattened_parts_separator}" if flattened_results_prefix else ""
 
+    k = (k,) if isinstance(k, int) else k
     metric_results = dict() if flatten_results else defaultdict(lambda: dict())
-    for tk in k:
-        for metric, v in _calculate(metrics, logits, targets, tk, return_aggregated=return_aggregated,
+    for ki in k:
+        for metric, v in _calculate(metrics, logits, targets, ki, return_aggregated=return_aggregated,
                                     return_individual=return_individual).items():
             if flatten_results:
-                metric_results[f"{flattened_results_prefix}{metric}@{tk}"] = v
+                metric_results[f"{full_prefix}{metric}@{ki}"] = v
             else:
-                metric_results[metric][tk] = v
+                metric_results[metric][ki] = v
 
     return dict(metric_results)
