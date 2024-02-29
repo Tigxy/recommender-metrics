@@ -1,6 +1,17 @@
-from collections import defaultdict
-from typing import Union
 import torch
+from typing import Union
+from enum import StrEnum, auto
+from collections import defaultdict
+
+
+class MetricEnum(StrEnum):
+    DCG = auto()
+    NDCG = auto()
+    Precision = auto()
+    Recall = auto()
+    F_Score = auto()
+    Hitrate = auto()
+    Coverage = auto()
 
 
 def dcg(logits: torch.Tensor, targets: torch.Tensor, k=10):
@@ -131,23 +142,24 @@ def coverage(logits: torch.Tensor, k=10):
 
 
 metric_fn_map_unary = {
-    "coverage": coverage
+    MetricEnum.Coverage: coverage
 }
 
 metric_fn_map_bi = {
-    "dcg": dcg,
-    "ndcg": ndcg,
-    "recall": recall,
-    "precision": precision,
-    "hitrate": hitrate,
-    "f_score": f_score
+    MetricEnum.DCG: dcg,
+    MetricEnum.NDCG: ndcg,
+    MetricEnum.Recall: recall,
+    MetricEnum.Precision: precision,
+    MetricEnum.Hitrate: hitrate,
+    MetricEnum.F_Score: f_score
 }
 
 # List of metrics that are currently supported
-supported_metrics = list(metric_fn_map_unary.keys()) + list(metric_fn_map_bi.keys())
+supported_metrics = tuple(MetricEnum)
 
 
-def _calculate(metrics: tuple, logits: torch.Tensor, targets=None, k=10, return_aggregated=True, return_individual=False):
+def _calculate(metrics: tuple[str | MetricEnum], logits: torch.Tensor, targets=None, k=10, return_aggregated=True,
+               return_individual=False):
     """
     Computes the values for a given list of metrics.
 
@@ -166,21 +178,22 @@ def _calculate(metrics: tuple, logits: torch.Tensor, targets=None, k=10, return_
 
     raw_results = {}
     for metric in metrics:
+        metric_name = metric.value if isinstance(metric, MetricEnum) else metric
         if metric in metric_fn_map_unary:
-            raw_results[metric] = metric_fn_map_unary[metric](logits, k)
+            raw_results[metric_name] = metric_fn_map_unary[metric](logits, k)
 
         elif metric in metric_fn_map_bi:
             if targets is None:
                 raise ValueError(f"'targets' is required to calculate '{metric}'!")
-            raw_results[metric] = metric_fn_map_bi[metric](logits, targets, k)
+            raw_results[metric_name] = metric_fn_map_bi[metric](logits, targets, k)
 
         else:
-            raise ValueError(f"Metric '{metric}' not supported.")
+            raise ValueError(f"Metric '{metric_name}' not supported.")
 
     results = {}
 
     if return_aggregated:
-        results.update({k: torch.mean(v).item() if isinstance(v, torch.Tensor) else v 
+        results.update({k: torch.mean(v).item() if isinstance(v, torch.Tensor) else v
                         for k, v in raw_results.items()})
 
     if return_individual:
@@ -189,7 +202,8 @@ def _calculate(metrics: tuple, logits: torch.Tensor, targets=None, k=10, return_
     return results
 
 
-def calculate(metrics: tuple, logits: torch.Tensor, targets=None, k: Union[int, list]=10, return_aggregated=True, return_individual=False):
+def calculate(metrics: tuple, logits: torch.Tensor, targets=None, k: Union[int, list] = 10, return_aggregated=True,
+              return_individual=False):
     """
     Computes the values for a given list of metrics.
 
@@ -204,10 +218,12 @@ def calculate(metrics: tuple, logits: torch.Tensor, targets=None, k: Union[int, 
         {<metric_name>_individual: list_of_values} if return_individual=True'
     """
     if isinstance(k, int):
-        return _calculate(metrics, logits, targets, k, return_aggregated=return_aggregated, return_individual=return_individual)
+        return _calculate(metrics, logits, targets, k, return_aggregated=return_aggregated,
+                          return_individual=return_individual)
 
     metric_results = defaultdict(lambda: dict())
     for tk in k:
-        for metric, v in _calculate(metrics, logits, targets, tk, return_aggregated=return_aggregated, return_individual=return_individual).items():
+        for metric, v in _calculate(metrics, logits, targets, tk, return_aggregated=return_aggregated,
+                                    return_individual=return_individual).items():
             metric_results[metric][tk] = v
     return dict(metric_results)

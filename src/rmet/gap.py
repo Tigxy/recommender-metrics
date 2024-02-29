@@ -1,15 +1,14 @@
 import torch
-import numpy as np
 import itertools
-from .metrics import calculate
 from .user_feature import UserFeature
+from .metrics import calculate, MetricEnum
 
 
 def __mean(v):
     return torch.mean(v).item() if isinstance(v, torch.Tensor) else v
 
 
-def calculate_for_feature(group: UserFeature, metrics: list, logits: torch.Tensor, targets=None,
+def calculate_for_feature(group: UserFeature, metrics: tuple[MetricEnum], logits: torch.Tensor, targets=None,
                           k=10, return_individual=False):
     """
     Computes the values for a given list of metrics for the users with different demographic features.
@@ -36,7 +35,9 @@ def calculate_for_feature(group: UserFeature, metrics: list, logits: torch.Tenso
 
     pairs = list(itertools.combinations(group.unique_labels, 2))
     for a, b in pairs:
-        results[f"{group.name}_{a}-{b}"] = {m: (results[f"{group.name}_{a}"][m] -
-                                               results[f"{group.name}_{b}"][m])
-                                            for m in metrics}
+        pair_results = dict()
+        for m in metrics:
+            metric_name = m.value if isinstance(m, MetricEnum) else m
+            pair_results[metric_name] = results[f"{group.name}_{a}"][m] - results[f"{group.name}_{b}"][m]
+        results[f"{group.name}_{a}-{b}"] = pair_results
     return results
