@@ -60,7 +60,7 @@ def precision(logits: torch.Tensor, targets: torch.Tensor, k: int = 10):
     if k <= 0:
         raise ValueError("k is required to be positive!")
 
-    top_indices = logits.topk(k, dim=-1).indices
+    top_indices = logits.topk(k, dim=-1, sorted=False).indices
     n_relevant_items = torch.gather(targets, dim=-1, index=top_indices).sum(dim=-1)
     return n_relevant_items / k
 
@@ -74,7 +74,7 @@ def recall(logits: torch.Tensor, targets: torch.Tensor, k: int = 10):
     :param targets: 0/1 matrix encoding true item relevance, same shape as logits
     :param k: top k items to consider
     """
-    top_indices = logits.topk(k, dim=-1).indices
+    top_indices = logits.topk(k, dim=-1, sorted=False).indices
     n_relevant_items = torch.gather(targets, dim=-1, index=top_indices).sum(dim=-1)
     n_total_relevant = targets.sum(dim=-1)
 
@@ -115,7 +115,7 @@ def hitrate(logits: torch.Tensor, targets: torch.Tensor, k: int = 10):
     :param targets: 0/1 matrix encoding true item relevance, same shape as logits
     :param k: top k items to consider
     """
-    top_indices = logits.topk(k, dim=-1).indices
+    top_indices = logits.topk(k, dim=-1, sorted=False).indices
     n_relevant_items = torch.gather(targets, dim=-1, index=top_indices).sum(dim=-1)
     n_total_relevant = targets.sum(dim=-1)
 
@@ -138,7 +138,7 @@ def coverage(logits: torch.Tensor, k: int = 10):
     :param logits: prediction matrix about item relevance
     :param k: top k items to consider
     """
-    top_indices = logits.topk(k, dim=-1).indices
+    top_indices = logits.topk(k, dim=-1, sorted=False).indices
     n_unique_recommended_items = top_indices.unique(sorted=False).shape[0]
     n_items = logits.shape[-1]
     return n_unique_recommended_items / n_items
