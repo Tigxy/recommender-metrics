@@ -202,8 +202,9 @@ def _calculate(metrics: tuple[str | MetricEnum], logits: torch.Tensor, targets=N
     return results
 
 
-def calculate(metrics: tuple, logits: torch.Tensor, targets=None, k: Union[int, list] = 10, return_aggregated=True,
-              return_individual=False):
+def calculate(metrics: tuple, logits: torch.Tensor, targets=None, k: Union[int, list] = 10,
+              return_aggregated: bool = True, return_individual: bool = False,
+              flatten_results: bool = False, flattened_results_prefix: str = ""):
     """
     Computes the values for a given list of metrics.
 
@@ -213,17 +214,26 @@ def calculate(metrics: tuple, logits: torch.Tensor, targets=None, k: Union[int, 
     :param k: top k items to consider
     :param return_aggregated: Whether aggregated metric results should be returned. 
     :param return_individual: Whether the results for individual users should be returned
+    :param flatten_results: Whether to flatten the results' dictionary. Key is of format "{prefix}{metric}@{k}"
+    :param flattened_results_prefix: Prefix to prepend to the flattened results key.
     :return: a dictionary containing ...
         {metric_name: value} if 'return_aggregated=True', and/or
         {<metric_name>_individual: list_of_values} if return_individual=True'
     """
+    if logits.shape != targets.shape:
+        raise ValueError(f"Logits and targets must be of same shape ({logits.shape} != {targets.shape})")
+
     if isinstance(k, int):
         return _calculate(metrics, logits, targets, k, return_aggregated=return_aggregated,
                           return_individual=return_individual)
 
-    metric_results = defaultdict(lambda: dict())
+    metric_results = dict() if flatten_results else defaultdict(lambda: dict())
     for tk in k:
         for metric, v in _calculate(metrics, logits, targets, tk, return_aggregated=return_aggregated,
                                     return_individual=return_individual).items():
-            metric_results[metric][tk] = v
+            if flatten_results:
+                metric_results[f"{flattened_results_prefix}{metric}@{tk}"] = v
+            else:
+                metric_results[metric][tk] = v
+
     return dict(metric_results)
