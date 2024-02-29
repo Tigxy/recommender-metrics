@@ -58,7 +58,7 @@ def precision(logits: torch.Tensor, targets: torch.Tensor, k=10):
         raise ValueError("k is required to be positive!")
 
     top_indices = logits.topk(k, dim=-1).indices
-    n_relevant_items = torch.gather(targets, dim=-1, index=top_indices).sum(axis=-1)
+    n_relevant_items = torch.gather(targets, dim=-1, index=top_indices).sum(dim=-1)
     return n_relevant_items / k
 
 
@@ -72,8 +72,8 @@ def recall(logits: torch.Tensor, targets: torch.Tensor, k=10):
     :param k: top k items to consider
     """
     top_indices = logits.topk(k, dim=-1).indices
-    n_relevant_items = torch.gather(targets, dim=-1, index=top_indices).sum(axis=-1)
-    n_total_relevant = targets.sum(axis=-1)
+    n_relevant_items = torch.gather(targets, dim=-1, index=top_indices).sum(dim=-1)
+    n_total_relevant = targets.sum(dim=-1)
 
     # may happen that there are no relevant true items, cover this possible DivisionByZero case.
     mask = n_total_relevant != 0
@@ -113,8 +113,8 @@ def hitrate(logits: torch.Tensor, targets: torch.Tensor, k=10):
     :param k: top k items to consider
     """
     top_indices = logits.topk(k, dim=-1).indices
-    n_relevant_items = torch.gather(targets, dim=-1, index=top_indices).sum(axis=-1)
-    n_total_relevant = targets.sum(axis=-1)
+    n_relevant_items = torch.gather(targets, dim=-1, index=top_indices).sum(dim=-1)
+    n_total_relevant = targets.sum(dim=-1)
 
     # basically a pairwise min(count_relevant_items, k)
     denominator = torch.where(n_total_relevant > k, k, n_total_relevant)
@@ -176,6 +176,9 @@ def _calculate(metrics: tuple[str | MetricEnum], logits: torch.Tensor, targets=N
     if logits.shape[-1] < k:
         raise ValueError(f"'k' must not be greater than the number of items ({k} > {logits.shape[-1]})!")
 
+    if not (return_individual or return_aggregated):
+        raise ValueError(f"Specify either 'return_individual' or 'return_aggregated' to receive results.")
+
     raw_results = {}
     for metric in metrics:
         metric_name = metric.value if isinstance(metric, MetricEnum) else metric
@@ -188,7 +191,7 @@ def _calculate(metrics: tuple[str | MetricEnum], logits: torch.Tensor, targets=N
             raw_results[metric_name] = metric_fn_map_bi[metric](logits, targets, k)
 
         else:
-            raise ValueError(f"Metric '{metric_name}' not supported.")
+            raise ValueError(f"Metric '{metric}' not supported.")
 
     results = {}
 
