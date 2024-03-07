@@ -17,38 +17,54 @@ class MetricEnum(StrEnum):
         return self.value
 
 
-def dcg(logits: torch.Tensor, targets: torch.Tensor, k=10):
+def _get_top_k(logits: torch.Tensor, k=10, logits_are_top_indices: bool = False, sorted: bool = True):
+    """
+    Gets the top-k indices for the logits
+
+    :param logits: prediction matrix about item relevance
+    :param k: top k items to consider
+    :param logits_are_top_indices: whether logits are already top-k sorted indices
+    :param sorted: whether indices should be returned in sorted order
+    """
+    return logits[:, :k] if logits_are_top_indices else logits.topk(k, dim=-1, sorted=sorted).indices
+
+
+def dcg(logits: torch.Tensor, targets: torch.Tensor, k=10, logits_are_top_indices: bool = False):
     """
     Computes the Discounted Cumulative Gain (DCG) for items.
 
     :param logits: prediction matrix about item relevance
     :param targets: 0/1 matrix encoding true item relevance, same shape as logits
     :param k: top k items to consider
+    :param logits_are_top_indices: whether logits are already top-k sorted indices
     """
-    top_indices = logits.topk(k, dim=-1).indices
+    top_indices = _get_top_k(logits, k, logits_are_top_indices)
     discount = 1 / torch.log2(torch.arange(1, k + 1) + 1)
     discount = discount.to(device=logits.device)
     relevancy_scores = torch.gather(targets, dim=-1, index=top_indices)
     return relevancy_scores.float() @ discount
 
 
-def ndcg(logits: torch.Tensor, targets: torch.Tensor, k: int = 10):
+def ndcg(logits: torch.Tensor, targets: torch.Tensor, k: int = 10, logits_are_top_indices: bool = False):
     """
     Computes the Normalized Discounted Cumulative Gain (nDCG) for items.
 
     :param logits: prediction matrix about item relevance
     :param targets: 0/1 matrix encoding true item relevance, same shape as logits
     :param k: top k items to consider
+    :param logits_are_top_indices: whether logits are already top-k sorted indices
     """
     if k <= 0:
         raise ValueError("k is required to be positive!")
 
     normalization = dcg(torch.ones(k), torch.ones(k), k)
     normalization = normalization.to(device=logits.device)
-    return dcg(logits, targets, k) / normalization
+    ndcg = dcg(logits, targets, k, logits_are_top_indices) / normalization
+
+    return ndcg
 
 
-def precision(logits: torch.Tensor, targets: torch.Tensor, k: int = 10):
+def precision(logits: torch.Tensor, targets: torch.Tensor, k: int = 10, logits_are_top_indices: bool = False):
     """
     Computes the Precision@k (P@k) for items.
     In short, this is the proportion of relevant items in the retrieved items.
@@ -56,16 +72,17 @@ def precision(logits: torch.Tensor, targets: torch.Tensor, k: int = 10):
     :param logits: prediction matrix about item relevance
     :param targets: 0/1 matrix encoding true item relevance, same shape as logits
     :param k: top k items to consider
+    :param logits_are_top_indices: whether logits are already top-k sorted indices
     """
     if k <= 0:
         raise ValueError("k is required to be positive!")
 
-    top_indices = logits.topk(k, dim=-1, sorted=False).indices
+    top_indices = _get_top_k(logits, k, logits_are_top_indices, sorted=False)
     n_relevant_items = torch.gather(targets, dim=-1, index=top_indices).sum(dim=-1)
     return n_relevant_items / k
 
 
-def recall(logits: torch.Tensor, targets: torch.Tensor, k: int = 10):
+def recall(logits: torch.Tensor, targets: torch.Tensor, k: int = 10, logits_are_top_indices: bool = False):
     """
     Computes the Recall@k (R@k) for items.
     In short, this is the proportion of relevant retrieved items of all relevant items.
@@ -73,8 +90,9 @@ def recall(logits: torch.Tensor, targets: torch.Tensor, k: int = 10):
     :param logits: prediction matrix about item relevance
     :param targets: 0/1 matrix encoding true item relevance, same shape as logits
     :param k: top k items to consider
+    :param logits_are_top_indices: whether logits are already top-k sorted indices
     """
-    top_indices = logits.topk(k, dim=-1, sorted=False).indices
+    top_indices = _get_top_k(logits, k, logits_are_top_indices, sorted=False)
     n_relevant_items = torch.gather(targets, dim=-1, index=top_indices).sum(dim=-1)
     n_total_relevant = targets.sum(dim=-1)
 
@@ -86,18 +104,19 @@ def recall(logits: torch.Tensor, targets: torch.Tensor, k: int = 10):
     return recall
 
 
-def f_score(logits: torch.Tensor, targets: torch.Tensor, k: int = 10):
+def f_score(logits: torch.Tensor, targets: torch.Tensor, k: int = 10, logits_are_top_indices: bool = False):
     """
     Computes the F-score@k (F@k) for items.
-    In short, this is the harmonic mena of precision@k and recall@k.
+    In short, this is the harmonic mean of precision@k and recall@k.
 
     :param logits: prediction matrix about item relevance
     :param targets: 0/1 matrix encoding true item relevance, same shape as logits
     :param k: top k items to consider
+    :param logits_are_top_indices: whether logits are already top-k sorted indices
     """
 
-    p = precision(logits, targets, k)
-    r = recall(logits, targets, k)
+    p = precision(logits, targets, k, logits_are_top_indices)
+    r = recall(logits, targets, k, logits_are_top_indices)
 
     pr = p + r
     mask = pr != 0
@@ -106,7 +125,7 @@ def f_score(logits: torch.Tensor, targets: torch.Tensor, k: int = 10):
     return f_score
 
 
-def hitrate(logits: torch.Tensor, targets: torch.Tensor, k: int = 10):
+def hitrate(logits: torch.Tensor, targets: torch.Tensor, k: int = 10, logits_are_top_indices: bool = False):
     """
     Computes the Hitrate@k (HR@k) for items.
     In short, this is the proportion of relevant that could be recommended.
@@ -114,8 +133,9 @@ def hitrate(logits: torch.Tensor, targets: torch.Tensor, k: int = 10):
     :param logits: prediction matrix about item relevance
     :param targets: 0/1 matrix encoding true item relevance, same shape as logits
     :param k: top k items to consider
+    :param logits_are_top_indices: whether logits are already top-k sorted indices
     """
-    top_indices = logits.topk(k, dim=-1, sorted=False).indices
+    top_indices = _get_top_k(logits, k, logits_are_top_indices, sorted=False)
     n_relevant_items = torch.gather(targets, dim=-1, index=top_indices).sum(dim=-1)
     n_total_relevant = targets.sum(dim=-1)
 
@@ -138,9 +158,13 @@ def coverage(logits: torch.Tensor, k: int = 10):
     :param logits: prediction matrix about item relevance
     :param k: top k items to consider
     """
-    top_indices = logits.topk(k, dim=-1, sorted=False).indices
-    n_unique_recommended_items = top_indices.unique(sorted=False).shape[0]
+    top_indices = _get_top_k(logits, k, logits_are_top_indices=False, sorted=False)
     n_items = logits.shape[-1]
+    return coverage_from_top_k(top_indices, n_items)
+
+
+def coverage_from_top_k(top_indices, n_items):
+    n_unique_recommended_items = top_indices.unique(sorted=False).shape[0]
     return n_unique_recommended_items / n_items
 
 
@@ -162,7 +186,8 @@ supported_metrics = tuple(MetricEnum)
 
 
 def _calculate(metrics: Iterable[str | MetricEnum], logits: torch.Tensor, targets: torch.Tensor = None, k: int = 10,
-               return_aggregated: bool = True, return_individual: bool = False):
+               best_logit_indices: torch.Tensor = None, return_aggregated: bool = True, return_individual: bool = False,
+               ):
     """
     Computes the values for a given list of metrics.
 
@@ -170,7 +195,8 @@ def _calculate(metrics: Iterable[str | MetricEnum], logits: torch.Tensor, target
     :param logits: prediction matrix about item relevance
     :param targets: 0/1 matrix encoding true item relevance, same shape as logits
     :param k: top k items to consider
-    :param return_aggregated: Whether aggregated metric results should be returned. 
+    :param best_logit_indices: Sorted indices of best logits, this can be used to speed up computations
+    :param return_aggregated: Whether aggregated metric results should be returned.
     :param return_individual: Whether the results for individual users should be returned
     :return: a dictionary containing ...
         {metric_name: value} if 'return_aggregated=True', and/or
@@ -190,7 +216,13 @@ def _calculate(metrics: Iterable[str | MetricEnum], logits: torch.Tensor, target
         elif metric in metric_fn_map_bi:
             if targets is None:
                 raise ValueError(f"'targets' is required to calculate '{metric}'!")
-            raw_results[str(metric)] = metric_fn_map_bi[metric](logits, targets, k)
+            # use pre-computed best logit indices to speed up computations
+            if best_logit_indices is not None:
+                raw_results[str(metric)] = metric_fn_map_bi[metric](best_logit_indices, targets, k,
+                                                                    logits_are_top_indices=True)
+            else:
+                raw_results[str(metric)] = metric_fn_map_bi[metric](logits, targets, k,
+                                                                    logits_are_top_indices=False)
 
         else:
             raise ValueError(f"Metric '{metric}' not supported.")
@@ -232,10 +264,12 @@ def calculate(metrics: Iterable[str | MetricEnum], logits: torch.Tensor, targets
     full_prefix = f"{flattened_results_prefix}{flattened_parts_separator}" if flattened_results_prefix else ""
 
     k = (k,) if isinstance(k, int) else k
+    best_logit_indices = logits.topk(max(k), dim=-1, sorted=True).indices
+
     metric_results = dict() if flatten_results else defaultdict(lambda: dict())
     for ki in k:
-        for metric, v in _calculate(metrics, logits, targets, ki, return_aggregated=return_aggregated,
-                                    return_individual=return_individual).items():
+        for metric, v in _calculate(metrics, logits, targets, ki, best_logit_indices=best_logit_indices,
+                                    return_aggregated=return_aggregated, return_individual=return_individual).items():
             if flatten_results:
                 metric_results[f"{full_prefix}{metric}@{ki}"] = v
             else:
