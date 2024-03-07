@@ -168,17 +168,17 @@ def coverage_from_top_k(top_indices, n_items):
     return n_unique_recommended_items / n_items
 
 
-metric_fn_map_unary = {
-    MetricEnum.Coverage: coverage
-}
-
-metric_fn_map_bi = {
+_metric_fn_map_user = {
     MetricEnum.DCG: dcg,
     MetricEnum.NDCG: ndcg,
     MetricEnum.Recall: recall,
     MetricEnum.Precision: precision,
     MetricEnum.Hitrate: hitrate,
     MetricEnum.F_Score: f_score
+}
+
+_metric_fn_map_distribution = {
+    MetricEnum.Coverage: coverage
 }
 
 # List of metrics that are currently supported
@@ -210,19 +210,19 @@ def _calculate(metrics: Iterable[str | MetricEnum], logits: torch.Tensor, target
 
     raw_results = {}
     for metric in metrics:
-        if metric in metric_fn_map_unary:
-            raw_results[str(metric)] = metric_fn_map_unary[metric](logits, k)
+        if metric in _metric_fn_map_distribution:
+            raw_results[str(metric)] = _metric_fn_map_distribution[metric](logits, k)
 
-        elif metric in metric_fn_map_bi:
+        elif metric in _metric_fn_map_user:
             if targets is None:
                 raise ValueError(f"'targets' is required to calculate '{metric}'!")
             # use pre-computed best logit indices to speed up computations
             if best_logit_indices is not None:
-                raw_results[str(metric)] = metric_fn_map_bi[metric](best_logit_indices, targets, k,
-                                                                    logits_are_top_indices=True)
+                raw_results[str(metric)] = _metric_fn_map_user[metric](best_logit_indices, targets, k,
+                                                                       logits_are_top_indices=True)
             else:
-                raw_results[str(metric)] = metric_fn_map_bi[metric](logits, targets, k,
-                                                                    logits_are_top_indices=False)
+                raw_results[str(metric)] = _metric_fn_map_user[metric](logits, targets, k,
+                                                                       logits_are_top_indices=False)
 
         else:
             raise ValueError(f"Metric '{metric}' not supported.")
