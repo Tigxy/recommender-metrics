@@ -183,6 +183,8 @@ _metric_fn_map_distribution = {
 
 # List of metrics that are currently supported
 supported_metrics = tuple(MetricEnum)
+supported_user_metrics = tuple(_metric_fn_map_user.keys())
+supported_distribution_metrics = tuple(_metric_fn_map_distribution.keys())
 
 
 def _calculate(metrics: Iterable[str | MetricEnum], logits: torch.Tensor, targets: torch.Tensor = None, k: int = 10,
