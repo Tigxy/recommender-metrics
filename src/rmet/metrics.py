@@ -57,7 +57,7 @@ def ndcg(logits: torch.Tensor, targets: torch.Tensor, k: int = 10, logits_are_to
     if k <= 0:
         raise ValueError("k is required to be positive!")
 
-    normalization = dcg(torch.ones(k), torch.ones(k), k)
+    normalization = dcg(targets, targets, k)
     normalization = normalization.to(device=logits.device)
     ndcg = dcg(logits, targets, k, logits_are_top_indices) / normalization
 
