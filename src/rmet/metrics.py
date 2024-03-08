@@ -189,8 +189,9 @@ supported_distribution_metrics = tuple(_metric_fn_map_distribution.keys())
 
 def calculate(metrics: Iterable[str | MetricEnum], logits: torch.Tensor = None, targets: torch.Tensor = None,
               k: int | Iterable[int] = 10, return_aggregated: bool = True, return_individual: bool = False,
-              flatten_results: bool = False, flattened_parts_separator: str = "/", flattened_results_prefix: str = "",
-              n_items: int = None, best_logit_indices: torch.Tensor = None, return_best_logit_indices: bool = False):
+              calculate_std: bool = False, flatten_results: bool = False, flattened_parts_separator: str = "/",
+              flattened_results_prefix: str = "", n_items: int = None, best_logit_indices: torch.Tensor = None,
+              return_best_logit_indices: bool = False):
     """
     Computes the values for a given list of metrics.
 
@@ -200,6 +201,7 @@ def calculate(metrics: Iterable[str | MetricEnum], logits: torch.Tensor = None, 
     :param k: top k items to consider
     :param return_aggregated: Whether aggregated metric results should be returned. 
     :param return_individual: Whether the results for individual users should be returned
+    :param calculate_std: Whether to calculate the standard deviation for the aggregated results
     :param flatten_results: Whether to flatten the results' dictionary.
                             Key is of format "{prefix}/{metric}@{k}" for separator "/"
     :param flattened_parts_separator: How to separate the individual parts of the flattened key
@@ -251,7 +253,7 @@ def calculate(metrics: Iterable[str | MetricEnum], logits: torch.Tensor = None, 
             results.update(individual_results)
 
         if return_aggregated:
-            aggregated_results = _aggregate_results(raw_results)
+            aggregated_results = _aggregate_results(raw_results, calculate_std)
             results.update(aggregated_results)
 
         for metric, v in results.items():
@@ -285,6 +287,9 @@ def _compute_raw_results(metrics: Iterable[str | MetricEnum], k: int,
     return raw_results
 
 
-def _aggregate_results(raw_results):
-    return {k: torch.mean(v).item() if isinstance(v, torch.Tensor) else v
-            for k, v in raw_results.items()}
+def _aggregate_results(raw_results, calculate_std: bool = False):
+    results = {k: torch.mean(v).item() if isinstance(v, torch.Tensor) else v
+               for k, v in raw_results.items()}
+    if calculate_std:
+        results.update({f"{k}_std": torch.std(v).item() for k, v in raw_results.items() if isinstance(v, torch.Tensor)})
+    return results
