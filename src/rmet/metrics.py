@@ -235,7 +235,7 @@ def calculate(metrics: Iterable[str | MetricEnum], logits: torch.Tensor = None, 
     if not (return_individual or return_aggregated):
         raise ValueError(f"Specify either 'return_individual' or 'return_aggregated' to receive results.")
 
-    n_items = n_items or logits.shape
+    n_items = n_items or logits.shape[-1]
     # to speed up computations, only retrieve highest logit indices once (if not already supplied)
     if best_logit_indices is None:
         best_logit_indices = logits.topk(max_k, dim=-1, sorted=True).indices
