@@ -1,17 +1,17 @@
 import torch
 from typing import Iterable
-from enum import StrEnum, auto
+from enum import Enum
 from collections import defaultdict
 
 
-class MetricEnum(StrEnum):
-    DCG = auto()
-    NDCG = auto()
-    Precision = auto()
-    Recall = auto()
-    F_Score = auto()
-    Hitrate = auto()
-    Coverage = auto()
+class MetricEnum(str, Enum):
+    DCG = "dcg"
+    NDCG = "ndcg"
+    Precision = "precision"
+    Recall = "recall"
+    F_Score = "f_score"
+    Hitrate = "hitrate"
+    Coverage = "coverage"
 
     def __str__(self):
         return self.value
