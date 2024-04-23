@@ -11,8 +11,13 @@ The following metrics are supported (all with the cut-off threshold `k`):
 - [Precision](https://en.wikipedia.org/wiki/Precision_and_recall#Precision)
 - [Recall](https://en.wikipedia.org/wiki/Precision_and_recall#Recall)
 - [F-score](https://en.wikipedia.org/wiki/F-score#Definition)
+- [Average Precision (AP)*](https://en.wikipedia.org/wiki/Evaluation_measures_(information_retrieval)#Average_precision)
 - Hitrate
 - Coverage
+
+_Notes_:  
+*\* Averaging the `average precision` of multiple samples leads to the `mean average precision (MAP)`, 
+which is often used in research.*
 
 ## Installation
 - Install it as usual with pip:
