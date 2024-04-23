@@ -12,6 +12,7 @@ class MetricEnum(str, Enum):
     F_Score = "f_score"
     Hitrate = "hitrate"
     Coverage = "coverage"
+    MAP = "map"
 
     def __str__(self):
         return self.value
@@ -150,6 +151,38 @@ def hitrate(logits: torch.Tensor, targets: torch.Tensor, k: int = 10, logits_are
     return recall
 
 
+def mean_average_precision(logits: torch.Tensor, targets: torch.Tensor, k: int = 10,
+                           logits_are_top_indices: bool = False):
+    """
+    Computes the mean_average_precision@k (MAP@k) for items.
+    In short, it combines precision values at all possible recall levels.
+
+    :param logits: prediction matrix about item relevance
+    :param targets: 0/1 matrix encoding true item relevance, same shape as logits
+    :param k: top k items to consider
+    :param logits_are_top_indices: whether logits are already top-k sorted indices
+    """
+    if k <= 0:
+        raise ValueError("k is required to be positive!")
+
+    top_indices = _get_top_k(logits, k, logits_are_top_indices, sorted=False)  # (n_samples, k)
+    n_total_relevant = targets.sum(dim=-1)  # (n_samples,)
+
+    total_precision = torch.zeros_like(n_total_relevant, dtype=torch.float, device=logits.device)  # (n_samples,)
+    for ki in range(1, k + 1):  # {1, ..., k}
+        # relevance of k'th indices (for -1 see offset in range)
+        position_relevance = torch.gather(targets, dim=-1, index=top_indices[:, ki-1:ki])[:, 0]  # (n_samples,)
+        position_precision = precision(top_indices, targets, ki, logits_are_top_indices=True)  # (n_samples,)
+        total_precision += position_precision * position_relevance
+
+    # may happen that there are no relevant true items, cover this possible DivisionByZero case.
+    mask = n_total_relevant != 0
+    avg_precision = torch.zeros_like(n_total_relevant, dtype=torch.float, device=logits.device)
+    avg_precision[mask] = total_precision[mask] / n_total_relevant[mask]
+
+    return avg_precision
+
+
 def coverage(logits: torch.Tensor, k: int = 10):
     """
     Computes the Coverage@k (Cov@k) for items.
@@ -174,7 +207,8 @@ _metric_fn_map_user = {
     MetricEnum.Recall: recall,
     MetricEnum.Precision: precision,
     MetricEnum.Hitrate: hitrate,
-    MetricEnum.F_Score: f_score
+    MetricEnum.F_Score: f_score,
+    MetricEnum.MAP: mean_average_precision
 }
 
 _metric_fn_map_distribution = {
