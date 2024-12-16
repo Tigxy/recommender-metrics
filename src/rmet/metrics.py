@@ -13,6 +13,7 @@ class MetricEnum(str, Enum):
     Hitrate = "hitrate"
     Coverage = "coverage"
     AP = "ap"
+    RR = "rr"
 
     def __str__(self):
         return self.value
@@ -185,6 +186,46 @@ def average_precision(logits: torch.Tensor, targets: torch.Tensor, k: int = 10,
     return avg_precision
 
 
+def reciprocal_rank(logits: torch.Tensor, targets: torch.Tensor, k: int = 10,
+                         logits_are_top_indices: bool = False):
+    """
+    Computes the reciprocal rank@k (RR@k) for items.
+    In short, it is the inverse rank of the first item that is relevant to the user.
+    High values indicate that early items in the recommendations are of interest to the user.
+    If there is no relevant item in the top-k recommendations, the reciprocal rank is 0
+
+    :param logits: prediction matrix about item relevance
+    :param targets: 0/1 matrix encoding true item relevance, same shape as logits
+    :param k: top k items to consider
+    :param logits_are_top_indices: whether logits are already top-k sorted indices
+
+    :returns: reciprocal rank for each sample of the input
+    """
+    if k <= 0:
+        raise ValueError("k is required to be positive!")
+
+    top_indices = _get_top_k(logits, k, logits_are_top_indices, sorted=True)  # (n_samples, k)
+    top_k_hits = torch.gather(targets, dim=-1, index=top_indices)
+
+    # earliest 'hits' in the recommendation list
+    # about determinism, from https://pytorch.org/docs/stable/generated/torch.max.html#torch.max:
+    # >>> If there are multiple maximal values in a reduced row
+    # >>> then the indices of the first maximal value are returned.
+    hits = torch.max(top_k_hits, dim=-1)
+
+    # mask to indicate which 'hits' are actually true
+    # (if there are no hits at all for some items)
+    mask = hits.values > 0
+
+    # by default, assume reciprocal rank of 0 for all users,
+    # which is the case if there is no match in the recommendations,
+    # i.e., if lim k->inf, 1/k->0
+    rr = torch.zeros_like(hits.values)
+    rr[mask] = 1. / (hits.indices[mask]+1).type(rr.dtype)  # +1 because indices are zero-based, while k is one-based
+
+    return rr
+
+
 def coverage(logits: torch.Tensor, k: int = 10):
     """
     Computes the Coverage@k (Cov@k) for items.
@@ -210,7 +251,8 @@ _metric_fn_map_user = {
     MetricEnum.Precision: precision,
     MetricEnum.Hitrate: hitrate,
     MetricEnum.F_Score: f_score,
-    MetricEnum.AP: average_precision
+    MetricEnum.AP: average_precision,
+    MetricEnum.RR: reciprocal_rank
 }
 
 _metric_fn_map_distribution = {

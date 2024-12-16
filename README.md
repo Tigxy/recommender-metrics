@@ -12,12 +12,14 @@ The following metrics are supported (all with the cut-off threshold `k`):
 - [Recall](https://en.wikipedia.org/wiki/Precision_and_recall#Recall)
 - [F-score](https://en.wikipedia.org/wiki/F-score#Definition)
 - [Average Precision (AP)*](https://en.wikipedia.org/wiki/Evaluation_measures_(information_retrieval)#Average_precision)
+- [Reciprocal Rank (RR)*](https://en.wikipedia.org/wiki/Mean_reciprocal_rank)
 - Hitrate
 - Coverage
 
 _Notes_:  
-*\* Averaging the `average precision` of multiple samples leads to the `mean average precision (MAP)`, 
-which is often used in research.*
+*\* Averaging `average precision` and `reciprocal rank` of multiple samples 
+leads to `mean average precision (MAP)` and `mean reciprocal rank (MRR)`, respectively, 
+which are often used in research.*
 
 ## Installation
 - Install it as usual with pip:
