@@ -356,9 +356,15 @@ def _compute_raw_results(metrics: Iterable[str | MetricEnum], k: int,
         elif metric in _metric_fn_map_user:
             if targets is None:
                 raise ValueError(f"'targets' is required to calculate '{metric}'!")
-            # use pre-computed best logit indices to speed up computations
-            raw_results[str(metric)] = _metric_fn_map_user[metric](best_logit_indices, targets, k,
-                                                                   logits_are_top_indices=True)
+            
+            # do not compute metrics for users where we do not have any 
+            # underlying ground truth interactions
+            mask = torch.argwhere(targets.sum(-1)).flatten(0)
+            metric_result = torch.zeros(targets.shape[0], device=targets.device)
+            metric_result[mask] = _metric_fn_map_user[metric](best_logit_indices[mask], 
+                                                              targets[mask], 
+                                                              k, logits_are_top_indices=True)
+            raw_results[str(metric)] = metric_result
 
         else:
             raise ValueError(f"Metric '{metric}' not supported.")
