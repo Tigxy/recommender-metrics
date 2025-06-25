@@ -31,6 +31,23 @@ def _get_top_k(logits: torch.Tensor, k=10, logits_are_top_indices: bool = False,
     return logits[:, :k] if logits_are_top_indices else logits.topk(k, dim=-1, sorted=sorted).indices
 
 
+def _get_relevancy_scores(targets: torch.Tensor, indices: torch.Tensor):
+    return torch.gather(targets, dim=-1, index=indices)
+
+
+def _get_top_k_relevancies(logits: torch.Tensor, targets: torch.Tensor, k=10, 
+                           logits_are_top_indices: bool = False, sorted: bool = True): 
+    top_indices = _get_top_k(logits, k, logits_are_top_indices, sorted=sorted)
+    return _get_relevancy_scores(targets, top_indices)
+
+
+def _get_n_top_k_relevant(logits: torch.Tensor, targets: torch.Tensor, k=10, 
+                          logits_are_top_indices: bool = False, sorted: bool = True):
+    relevancy_scores = _get_top_k_relevancies(logits, targets, k, logits_are_top_indices, 
+                                              sorted=sorted)
+    return relevancy_scores.sum(-1)
+
+
 def dcg(logits: torch.Tensor, targets: torch.Tensor, k=10, logits_are_top_indices: bool = False):
     """
     Computes the Discounted Cumulative Gain (DCG) for items.
@@ -40,10 +57,9 @@ def dcg(logits: torch.Tensor, targets: torch.Tensor, k=10, logits_are_top_indice
     :param k: top k items to consider
     :param logits_are_top_indices: whether logits are already top-k sorted indices
     """
-    top_indices = _get_top_k(logits, k, logits_are_top_indices)
+    relevancy_scores = _get_top_k_relevancies(logits, targets, k, logits_are_top_indices, sorted=True)
     discount = 1 / torch.log2(torch.arange(1, k + 1) + 1)
     discount = discount.to(device=logits.device)
-    relevancy_scores = torch.gather(targets, dim=-1, index=top_indices)
     return relevancy_scores.float() @ discount
 
 
@@ -78,9 +94,9 @@ def precision(logits: torch.Tensor, targets: torch.Tensor, k: int = 10, logits_a
     """
     if k <= 0:
         raise ValueError("k is required to be positive!")
-
-    top_indices = _get_top_k(logits, k, logits_are_top_indices, sorted=False)
-    n_relevant_items = torch.gather(targets, dim=-1, index=top_indices).sum(dim=-1)
+    
+    n_relevant_items = _get_n_top_k_relevant(logits, targets, k, logits_are_top_indices, 
+                                             sorted=False)
     return n_relevant_items / k
 
 
@@ -94,8 +110,8 @@ def recall(logits: torch.Tensor, targets: torch.Tensor, k: int = 10, logits_are_
     :param k: top k items to consider
     :param logits_are_top_indices: whether logits are already top-k sorted indices
     """
-    top_indices = _get_top_k(logits, k, logits_are_top_indices, sorted=False)
-    n_relevant_items = torch.gather(targets, dim=-1, index=top_indices).sum(dim=-1)
+    n_relevant_items = _get_n_top_k_relevant(logits, targets, k, logits_are_top_indices, 
+                                             sorted=False)
     n_total_relevant = targets.sum(dim=-1)
 
     # may happen that there are no relevant true items, cover this possible DivisionByZero case.
@@ -137,8 +153,8 @@ def hitrate(logits: torch.Tensor, targets: torch.Tensor, k: int = 10, logits_are
     :param k: top k items to consider
     :param logits_are_top_indices: whether logits are already top-k sorted indices
     """
-    top_indices = _get_top_k(logits, k, logits_are_top_indices, sorted=False)
-    n_relevant_items = torch.gather(targets, dim=-1, index=top_indices).sum(dim=-1)
+    n_relevant_items = _get_n_top_k_relevant(logits, targets, k, logits_are_top_indices, 
+                                             sorted=False)
     n_total_relevant = targets.sum(dim=-1)
 
     # basically a pairwise min(count_relevant_items, k)
@@ -174,7 +190,7 @@ def average_precision(logits: torch.Tensor, targets: torch.Tensor, k: int = 10,
     total_precision = torch.zeros_like(n_total_relevant, dtype=torch.float, device=logits.device)  # (n_samples,)
     for ki in range(1, k + 1):  # {1, ..., k}
         # relevance of k'th indices (for -1 see offset in range)
-        position_relevance = torch.gather(targets, dim=-1, index=top_indices[:, ki - 1:ki])[:, 0]  # (n_samples,)
+        position_relevance = _get_relevancy_scores(targets, top_indices[:, ki - 1:ki])[:, 0]  # (n_samples,)
         position_precision = precision(top_indices, targets, ki, logits_are_top_indices=True)  # (n_samples,)
         total_precision += position_precision * position_relevance
 
@@ -204,14 +220,14 @@ def reciprocal_rank(logits: torch.Tensor, targets: torch.Tensor, k: int = 10,
     if k <= 0:
         raise ValueError("k is required to be positive!")
 
-    top_indices = _get_top_k(logits, k, logits_are_top_indices, sorted=True)  # (n_samples, k)
-    top_k_hits = torch.gather(targets, dim=-1, index=top_indices)
+    relevancy_scores = _get_top_k_relevancies(logits, targets, k, logits_are_top_indices, 
+                                              sorted=True)
 
     # earliest 'hits' in the recommendation list
     # about determinism, from https://pytorch.org/docs/stable/generated/torch.max.html#torch.max:
     # >>> If there are multiple maximal values in a reduced row
     # >>> then the indices of the first maximal value are returned.
-    hits = torch.max(top_k_hits, dim=-1)
+    hits = torch.max(relevancy_scores, dim=-1)
 
     # mask to indicate which 'hits' are actually true
     # (if there are no hits at all for some items)
@@ -316,7 +332,7 @@ def calculate(metrics: Iterable[str | MetricEnum], logits: torch.Tensor = None, 
     n_items = n_items or logits.shape[-1]
     # to speed up computations, only retrieve highest logit indices once (if not already supplied)
     if best_logit_indices is None:
-        best_logit_indices = logits.topk(max_k, dim=-1, sorted=True).indices
+        best_logit_indices = _get_top_k(logits, k, logits_are_top_indices=False, sorted=True)
 
     full_prefix = f"{flattened_results_prefix}{flattened_parts_separator}" if flattened_results_prefix else ""
 
