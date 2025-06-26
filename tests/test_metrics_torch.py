@@ -29,7 +29,7 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
         )
 
         self.k = 3
-        self.best_logit_indices = [[0,1,3], [3,4,2]]
+        self.best_logit_indices = [[0, 1, 3], [3, 4, 2]]
 
         self.precision1 = 2 / 3
         self.precision2 = 2 / 3
@@ -147,10 +147,10 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
 
     def test_coverage(self):
         self.assertAlmostEqual(coverage(self.logits, self.k), self.coverage)
-        self.assertAlmostEqual(coverage(self.logits, 2), 4/5)
+        self.assertAlmostEqual(coverage(self.logits, 2), 4 / 5)
 
     def test_compute_nested(self):
-        
+
         result = calculate(
             metrics=self.metrics,
             logits=self.logits,
@@ -225,7 +225,6 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
             else:
                 self.assertAlmostEqual(result[k], expected[k])
 
-    
     def test_best_indices(self):
 
         result, best_indices = calculate(
@@ -238,7 +237,9 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
             flatten_results=True,
         )
 
-        self.assertTrue(torch.allclose(best_indices, torch.tensor(self.best_logit_indices)))
+        self.assertTrue(
+            torch.allclose(best_indices, torch.tensor(self.best_logit_indices))
+        )
 
         result_on_best_logits = calculate(
             metrics=self.metrics,
