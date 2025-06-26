@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 from typing import Iterable
 from enum import Enum
 from collections import defaultdict
@@ -19,8 +20,35 @@ class MetricEnum(str, Enum):
         return self.value
 
 
+def _assert_supported_type(a: any):
+    if not isinstance(a, (np.ndarray, torch.Tensor )):
+        raise TypeError(f"Type {type(a)} of input not supported.")
+
+
+def _zeros_like_float(a: torch.Tensor | np.ndarray):
+    if isinstance(a, torch.Tensor):
+        return torch.zeros_like(a, dtype=torch.float, device=a.device)
+
+    elif isinstance(a, np.ndarray):
+        return np.zeros_like(a, dtype=float)
+
+    else:
+        _assert_supported_type(a)
+
+
+def _as_float(a: torch.Tensor | np.ndarray):
+    if isinstance(a, torch.Tensor):
+        return a.float()
+
+    elif isinstance(a, np.ndarray):
+        return a.astype(float)
+
+    else:
+        _assert_supported_type(a)
+
+
 def _get_top_k(
-    logits: torch.Tensor,
+    logits: torch.Tensor | np.ndarray,
     k=10,
     logits_are_top_indices: bool = False,
     sorted: bool = True,
@@ -33,20 +61,46 @@ def _get_top_k(
     :param logits_are_top_indices: whether logits are already top-k sorted indices
     :param sorted: whether indices should be returned in sorted order
     """
-    return (
-        logits[:, :k]
-        if logits_are_top_indices
-        else logits.topk(k, dim=-1, sorted=sorted).indices
-    )
+    if logits_are_top_indices:
+        return logits[:, :k]
+
+    else:
+        if isinstance(logits, torch.Tensor):
+            return logits.topk(k, dim=-1, sorted=sorted).indices
+
+        elif isinstance(logits, np.ndarray):
+            # use partition which is much faster than argsort() on big arrays
+            indices_unsorted = np.argpartition(logits, -k, axis=-1)[:, -k:]
+            if not sorted:
+                return indices_unsorted
+
+            # sort indices by their values
+            values_unsorted = np.take_along_axis(logits, indices_unsorted, axis=-1)
+            sorting = np.argsort(values_unsorted, axis=-1)
+            indices_sorted = np.take_along_axis(indices_unsorted, sorting, axis=-1)
+
+            # reverse order from high to low
+            return indices_sorted[:, ::-1]
+        else:
+            _assert_supported_type(logits)
 
 
-def _get_relevancy_scores(targets: torch.Tensor, indices: torch.Tensor):
-    return torch.gather(targets, dim=-1, index=indices)
+def _get_relevancy_scores(
+    targets: torch.Tensor | np.ndarray, indices: torch.Tensor | np.ndarray
+):
+    if isinstance(targets, torch.Tensor):
+        return torch.gather(targets, dim=-1, index=indices)
+
+    elif isinstance(indices, np.ndarray):
+        return np.take_along_axis(targets, indices, axis=-1)
+
+    else:
+        _assert_supported_type(targets)
 
 
 def _get_top_k_relevancies(
-    logits: torch.Tensor,
-    targets: torch.Tensor,
+    logits: torch.Tensor | np.ndarray,
+    targets: torch.Tensor | np.ndarray,
     k=10,
     logits_are_top_indices: bool = False,
     sorted: bool = True,
@@ -56,8 +110,8 @@ def _get_top_k_relevancies(
 
 
 def _get_n_top_k_relevant(
-    logits: torch.Tensor,
-    targets: torch.Tensor,
+    logits: torch.Tensor | np.ndarray,
+    targets: torch.Tensor | np.ndarray,
     k=10,
     logits_are_top_indices: bool = False,
     sorted: bool = True,
@@ -69,8 +123,8 @@ def _get_n_top_k_relevant(
 
 
 def dcg(
-    logits: torch.Tensor,
-    targets: torch.Tensor,
+    logits: torch.Tensor | np.ndarray,
+    targets: torch.Tensor | np.ndarray,
     k=10,
     logits_are_top_indices: bool = False,
 ):
@@ -85,14 +139,22 @@ def dcg(
     relevancy_scores = _get_top_k_relevancies(
         logits, targets, k, logits_are_top_indices, sorted=True
     )
-    discount = 1 / torch.log2(torch.arange(1, k + 1) + 1)
-    discount = discount.to(device=logits.device)
-    return relevancy_scores.float() @ discount
 
+    if isinstance(relevancy_scores, torch.Tensor):
+        discount = 1 / torch.log2(torch.arange(1, k + 1) + 1)
+        discount = discount.to(device=logits.device)
+
+    elif isinstance(relevancy_scores, np.ndarray):
+        discount = 1 / np.log2(np.arange(1, k + 1) + 1)
+
+    else:
+        _assert_supported_type(relevancy_scores)
+
+    return _as_float(relevancy_scores) @ discount
 
 def ndcg(
-    logits: torch.Tensor,
-    targets: torch.Tensor,
+    logits: torch.Tensor | np.ndarray,
+    targets: torch.Tensor | np.ndarray,
     k: int = 10,
     logits_are_top_indices: bool = False,
 ):
@@ -108,15 +170,14 @@ def ndcg(
         raise ValueError("k is required to be positive!")
 
     normalization = dcg(targets, targets, k)
-    normalization = normalization.to(device=logits.device)
     ndcg = dcg(logits, targets, k, logits_are_top_indices) / normalization
 
     return ndcg
 
 
 def precision(
-    logits: torch.Tensor,
-    targets: torch.Tensor,
+    logits: torch.Tensor | np.ndarray,
+    targets: torch.Tensor | np.ndarray,
     k: int = 10,
     logits_are_top_indices: bool = False,
 ):
@@ -139,8 +200,8 @@ def precision(
 
 
 def recall(
-    logits: torch.Tensor,
-    targets: torch.Tensor,
+    logits: torch.Tensor | np.ndarray,
+    targets: torch.Tensor | np.ndarray,
     k: int = 10,
     logits_are_top_indices: bool = False,
 ):
@@ -156,19 +217,18 @@ def recall(
     n_relevant_items = _get_n_top_k_relevant(
         logits, targets, k, logits_are_top_indices, sorted=False
     )
-    n_total_relevant = targets.sum(dim=-1)
+    n_total_relevant = targets.sum(-1)
 
     # may happen that there are no relevant true items, cover this possible DivisionByZero case.
     mask = n_total_relevant != 0
-    recall = torch.zeros_like(n_relevant_items, dtype=torch.float, device=logits.device)
+    recall = _zeros_like_float(n_relevant_items)
     recall[mask] = n_relevant_items[mask] / n_total_relevant[mask]
-
     return recall
 
 
 def f_score(
-    logits: torch.Tensor,
-    targets: torch.Tensor,
+    logits: torch.Tensor | np.ndarray,
+    targets: torch.Tensor | np.ndarray,
     k: int = 10,
     logits_are_top_indices: bool = False,
 ):
@@ -187,14 +247,14 @@ def f_score(
 
     pr = p + r
     mask = pr != 0
-    f_score = torch.zeros_like(r, dtype=torch.float, device=logits.device)
+    f_score = _zeros_like_float(r)
     f_score[mask] = 2 * ((p * r)[mask] / pr[mask])
     return f_score
 
 
 def hitrate(
-    logits: torch.Tensor,
-    targets: torch.Tensor,
+    logits: torch.Tensor | np.ndarray,
+    targets: torch.Tensor | np.ndarray,
     k: int = 10,
     logits_are_top_indices: bool = False,
 ):
@@ -211,12 +271,12 @@ def hitrate(
     n_relevant_items = _get_n_top_k_relevant(
         logits, targets, k, logits_are_top_indices, sorted=False
     )
-    return n_relevant_items.clip(max=1).float()
+    return _as_float(n_relevant_items.clip(max=1))
 
 
 def average_precision(
-    logits: torch.Tensor,
-    targets: torch.Tensor,
+    logits: torch.Tensor | np.ndarray,
+    targets: torch.Tensor | np.ndarray,
     k: int = 10,
     logits_are_top_indices: bool = False,
 ):
@@ -234,39 +294,32 @@ def average_precision(
     if k <= 0:
         raise ValueError("k is required to be positive!")
 
-    top_indices = _get_top_k(
-        logits, k, logits_are_top_indices, sorted=True
-    )  # (n_samples, k)
-    n_total_relevant = targets.sum(dim=-1)  # (n_samples,)
+    top_indices = _get_top_k(logits, k, logits_are_top_indices, sorted=True)
+    n_total_relevant = targets.sum(-1)
 
-    total_precision = torch.zeros_like(
-        n_total_relevant, dtype=torch.float, device=logits.device
-    )  # (n_samples,)
-    for ki in range(1, k + 1):  # {1, ..., k}
+    total_precision = _zeros_like_float(n_total_relevant)
+    for ki in range(1, k + 1):
         # relevance of k'th indices (for -1 see offset in range)
         position_relevance = _get_relevancy_scores(
             targets, top_indices[:, ki - 1 : ki]
-        )[
-            :, 0
-        ]  # (n_samples,)
+        )[:, 0]
         position_precision = precision(
             top_indices, targets, ki, logits_are_top_indices=True
-        )  # (n_samples,)
+        )
         total_precision += position_precision * position_relevance
 
     # may happen that there are no relevant true items, cover this possible DivisionByZero case.
     mask = n_total_relevant != 0
-    avg_precision = torch.zeros_like(
-        n_total_relevant, dtype=torch.float, device=logits.device
-    )
+
+    avg_precision = _zeros_like_float(n_total_relevant)
     avg_precision[mask] = total_precision[mask] / n_total_relevant[mask]
 
     return avg_precision
 
 
 def reciprocal_rank(
-    logits: torch.Tensor,
-    targets: torch.Tensor,
+    logits: torch.Tensor | np.ndarray,
+    targets: torch.Tensor | np.ndarray,
     k: int = 10,
     logits_are_top_indices: bool = False,
 ):
@@ -294,24 +347,38 @@ def reciprocal_rank(
     # about determinism, from https://pytorch.org/docs/stable/generated/torch.max.html#torch.max:
     # >>> If there are multiple maximal values in a reduced row
     # >>> then the indices of the first maximal value are returned.
-    hits = torch.max(relevancy_scores, dim=-1)
+    if isinstance(relevancy_scores, torch.Tensor):
+        max_result = torch.max(relevancy_scores, -1)
+        max_indices = max_result.indices
+        max_values = max_result.values
+
+    elif isinstance(relevancy_scores, np.ndarray):
+        max_indices = np.argmax(relevancy_scores, -1, keepdims=True)
+        max_values = np.take_along_axis(relevancy_scores, max_indices, axis=-1)
+
+    else:
+        _assert_supported_type(relevancy_scores)
 
     # mask to indicate which 'hits' are actually true
     # (if there are no hits at all for some items)
-    mask = hits.values > 0
+    mask = max_values > 0
 
     # by default, assume reciprocal rank of 0 for all users,
     # which is the case if there is no match in the recommendations,
     # i.e., if lim k->inf, 1/k->0
-    rr = torch.zeros_like(hits.values, dtype=torch.float)
-    rr[mask] = 1.0 / (hits.indices[mask] + 1).type(
-        rr.dtype
-    )  # +1 because indices are zero-based, while k is one-based
+    rr = _zeros_like_float(max_values)
 
+    denominator = max_indices[mask] + 1
+    if isinstance(denominator, torch.Tensor):
+        # pytorch is more strict with matching types, so we'll handle it specially 
+        denominator = denominator.type(rr.dtype) 
+
+    # +1 because indices are zero-based, while k is one-based
+    rr[mask] = 1.0 / denominator
     return rr
 
 
-def coverage(logits: torch.Tensor, k: int = 10):
+def coverage(logits: torch.Tensor | np.ndarray, k: int = 10):
     """
     Computes the Coverage@k (Cov@k) for items.
     In short, this is the proportion of all items that are recommended to the users.
@@ -324,9 +391,23 @@ def coverage(logits: torch.Tensor, k: int = 10):
     return coverage_from_top_k(top_indices, k, n_items)
 
 
-def coverage_from_top_k(top_indices: torch.Tensor, k: int, n_items: int):
-    n_unique_recommended_items = top_indices[:, :k].unique(sorted=False).shape[0]
+def coverage_from_top_k(top_indices: torch.Tensor | np.ndarray, k: int, n_items: int):
+    unique_values = _get_unique_values(top_indices, k)
+
+    n_unique_recommended_items = unique_values.shape[0]
     return n_unique_recommended_items / n_items
+
+
+def _get_unique_values(top_indices, k):
+    if isinstance(top_indices, torch.Tensor):
+        unique_values = top_indices[:, :k].unique(sorted=False)
+
+    elif isinstance(top_indices, np.ndarray):
+        unique_values = np.unique(top_indices)
+
+    else:
+        _assert_supported_type(top_indices)
+    return unique_values
 
 
 _metric_fn_map_user = {
@@ -350,8 +431,8 @@ supported_distribution_metrics = tuple(_metric_fn_map_distribution.keys())
 
 def calculate(
     metrics: Iterable[str | MetricEnum],
-    logits: torch.Tensor = None,
-    targets: torch.Tensor = None,
+    logits: torch.Tensor | np.ndarray = None,
+    targets: torch.Tensor | np.ndarray = None,
     k: int | Iterable[int] = 10,
     return_aggregated: bool = True,
     return_individual: bool = False,
@@ -360,7 +441,7 @@ def calculate(
     flattened_parts_separator: str = "/",
     flattened_results_prefix: str = "",
     n_items: int = None,
-    best_logit_indices: torch.Tensor = None,
+    best_logit_indices: torch.Tensor | np.ndarray = None,
     return_best_logit_indices: bool = False,
 ):
     """
@@ -436,12 +517,12 @@ def calculate(
 
         results = {}
         if return_individual:
-            individual_results = {
-                k + "_individual": v
-                for k, v in raw_results.items()
-                if isinstance(v, torch.Tensor)
-            }
-            results.update(individual_results)
+            for k, v in raw_results.items():
+                if not isinstance(v, float):
+                    results[k + "_individual"] = v
+                else: 
+                    # no individual values for global metrics available
+                    results[k] = v
 
         if return_aggregated:
             aggregated_results = _aggregate_results(raw_results, calculate_std)
@@ -462,9 +543,9 @@ def calculate(
 def _compute_raw_results(
     metrics: Iterable[str | MetricEnum],
     k: int,
-    best_logit_indices: torch.Tensor,
+    best_logit_indices: torch.Tensor | np.ndarray,
     n_items: int,
-    targets: torch.Tensor = None,
+    targets: torch.Tensor | np.ndarray = None,
 ):
     raw_results = {}
     for metric in metrics:
@@ -479,8 +560,19 @@ def _compute_raw_results(
 
             # do not compute metrics for users where we do not have any
             # underlying ground truth interactions
-            mask = torch.argwhere(targets.sum(-1)).flatten(0)
-            metric_result = torch.zeros(targets.shape[0], device=targets.device)
+            n_targets = targets.sum(-1)
+
+            if isinstance(n_targets, torch.Tensor):
+                mask = torch.argwhere(n_targets).flatten()
+                metric_result = torch.zeros(targets.shape[0], device=targets.device)
+
+            elif isinstance(n_targets, np.ndarray):
+                mask = np.argwhere(n_targets).flatten()
+                metric_result = torch.zeros(targets.shape[0])
+
+            else:
+                _assert_supported_type(n_targets)
+
             metric_result[mask] = _metric_fn_map_user[metric](
                 best_logit_indices[mask], targets[mask], k, logits_are_top_indices=True
             )
@@ -490,17 +582,25 @@ def _compute_raw_results(
             raise ValueError(f"Metric '{metric}' not supported.")
     return raw_results
 
-def _aggregate_results(raw_results, calculate_std: bool = False):
-    results = {
-        k: torch.mean(v).item() if isinstance(v, torch.Tensor) else v
-        for k, v in raw_results.items()
-    }
-    if calculate_std:
-        results.update(
-            {
-                f"{k}_std": torch.std(v).item()
-                for k, v in raw_results.items()
-                if isinstance(v, torch.Tensor)
-            }
-        )
+
+def _aggregate_results(
+    raw_results: dict[str, torch.Tensor | np.ndarray], calculate_std: bool = False
+):
+    results = {}
+    for k, v in raw_results.items():
+        if isinstance(v, torch.Tensor):
+            results[k] = torch.mean(v).item()
+            if calculate_std:
+                results[f"{k}_std"] = torch.std(v).item()
+
+        elif isinstance(v, np.ndarray):
+            results[k] = np.mean(v).item()
+            if calculate_std:
+                # set degrees of freedom to 1 to have same results as torch
+                results[f"{k}_std"] = np.std(v, ddof=1).item()
+
+        else: 
+            # nothing to do here, as global metrics are already registered as results before
+            pass
+
     return results

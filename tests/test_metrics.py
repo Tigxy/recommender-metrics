@@ -20,16 +20,20 @@ import numpy as np
 class TestRecommenderMetricsTorch(unittest.TestCase):
 
     def setUp(self):
-        self.logits = torch.tensor(
-            [[0.9, 0.8, 0.1, 0.4, 0.2], [0.1, 0.2, 0.3, 0.9, 0.8]]
-        )
-        self.targets = torch.tensor(
-            # relevant: [0, 2, 3], [3, 4]
-            [[1, 0, 1, 1, 0], [0, 0, 0, 1, 1]]
-        )
+        self.logits = [[0.9, 0.8, 0.1, 0.4, 0.2], [0.1, 0.2, 0.3, 0.9, 0.8]]
+        # relevant: [0, 2, 3], [3, 4]
+        self.targets = [[1, 0, 1, 1, 0], [0, 0, 0, 1, 1]]
+
+        self.logits_torch = torch.tensor(self.logits)
+        self.targets_torch = torch.tensor(self.targets)
+
+        self.logits_np = np.array(self.logits)
+        self.targets_np = np.array(self.targets)
 
         self.k = 3
         self.best_logit_indices = [[0, 1, 3], [3, 4, 2]]
+        self.best_logit_indices_torch = torch.tensor(self.best_logit_indices)
+        self.best_logit_indices_np = np.array(self.best_logit_indices)
 
         self.precision1 = 2 / 3
         self.precision2 = 2 / 3
@@ -87,54 +91,88 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
         self.metrics = list(self.user_computation_results.keys()) + ["coverage"]
 
     def test_precision(self):
-        # pytorch
-        expected = torch.tensor([self.precision1, self.precision2])
-        result = precision(self.logits, self.targets, self.k)
+        expected = torch.tensor(self.precision)
+        result = precision(self.logits_torch, self.targets_torch, self.k)
         self.assertTrue(torch.allclose(result, expected, atol=1e-4))
+
+    def test_precision_numpy(self):
+        expected = np.array(self.precision)
+        result = precision(self.logits_np, self.targets_np, self.k)
+        self.assertTrue(np.allclose(result, expected, atol=1e-4))
 
     def test_recall(self):
-        expected = torch.tensor([self.recall1, self.recall2])
-        result = recall(self.logits, self.targets, self.k)
+        expected = torch.tensor(self.recall)
+        result = recall(self.logits_torch, self.targets_torch, self.k)
         self.assertTrue(torch.allclose(result, expected, atol=1e-4))
+
+    def test_recall_numpy(self):
+        expected = np.array(self.recall)
+        result = recall(self.logits_np, self.targets_np, self.k)
+        self.assertTrue(np.allclose(result, expected, atol=1e-4))
 
     def test_dcg(self):
-        expected = torch.tensor(
-            [
-                self.dcg1,
-                self.dcg2,
-            ]
-        )
-        result = dcg(self.logits, self.targets, self.k)
+        expected = torch.tensor(self.dcg)
+        result = dcg(self.logits_torch, self.targets_torch, self.k)
         self.assertTrue(torch.allclose(result, expected, atol=1e-4))
+
+    def test_dcg_numpy(self):
+        expected = np.array(self.dcg)
+        result = dcg(self.logits_np, self.targets_np, self.k)
+        self.assertTrue(np.allclose(result, expected, atol=1e-4))
 
     def test_ndcg(self):
-        expected = torch.tensor([self.ndcg1, self.ndcg2])
-        result = ndcg(self.logits, self.targets, self.k)
+        expected = torch.tensor(self.ndcg)
+        result = ndcg(self.logits_torch, self.targets_torch, self.k)
         self.assertTrue(torch.allclose(result, expected, atol=1e-4))
+
+    def test_ndcg_numpy(self):
+        expected = np.array(self.ndcg)
+        result = ndcg(self.logits_np, self.targets_np, self.k)
+        self.assertTrue(np.allclose(result, expected, atol=1e-4))
 
     def test_hitrate(self):
-        expected = torch.tensor([self.hitrate1, self.hitrate2])
-        result = hitrate(self.logits, self.targets, self.k)
-        self.assertTrue(torch.equal(result, expected))
+        expected = torch.tensor(self.hitrate)
+        result = hitrate(self.logits_torch, self.targets_torch, self.k)
+        self.assertTrue(torch.allclose(result, expected))
+
+    def test_hitrate_numpy(self):
+        expected = np.array(self.hitrate)
+        result = hitrate(self.logits_np, self.targets_np, self.k)
+        self.assertTrue(np.allclose(result, expected))
 
     def test_f_score(self):
-        expected = torch.tensor([self.f1_user1, self.f1_user2])
-        result = f_score(self.logits, self.targets, self.k)
+        expected = torch.tensor(self.f1_user)
+        result = f_score(self.logits_torch, self.targets_torch, self.k)
         self.assertTrue(torch.allclose(result, expected, atol=1e-4))
+
+    def test_f_score_numpy(self):
+        expected = np.array(self.f1_user)
+        result = f_score(self.logits_np, self.targets_np, self.k)
+        self.assertTrue(np.allclose(result, expected, atol=1e-4))
 
     def test_average_precision(self):
-        expected = torch.tensor([self.ap1, self.ap2])
-        result = average_precision(self.logits, self.targets, self.k)
+        expected = torch.tensor(self.ap)
+        result = average_precision(self.logits_torch, self.targets_torch, self.k)
         self.assertTrue(torch.allclose(result, expected, atol=1e-4))
+
+    def test_average_precision_numpy(self):
+        expected = np.array(self.ap)
+        result = average_precision(self.logits_np, self.targets_np, self.k)
+        self.assertTrue(np.allclose(result, expected, atol=1e-4))
 
     def test_reciprocal_rank(self):
-        expected = torch.tensor([self.rr1, self.rr2])
-        result = reciprocal_rank(self.logits, self.targets, self.k)
+        expected = torch.tensor(self.rr)
+        result = reciprocal_rank(self.logits_torch, self.targets_torch, self.k)
         self.assertTrue(torch.allclose(result, expected, atol=1e-4))
 
+    def test_reciprocal_rank_numpy(self):
+        expected = np.array(self.rr)
+        result = reciprocal_rank(self.logits_np, self.targets_np, self.k)
+        self.assertTrue(np.allclose(result, expected, atol=1e-4))
+
     def test_all_zero_targets(self):
-        logits = self.logits
-        targets = torch.zeros_like(self.targets)
+        logits = self.logits_torch
+        targets = torch.zeros_like(self.targets_torch)
         k = self.k
 
         zero = torch.tensor([0.0, 0.0])
@@ -146,15 +184,19 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
         self.assertTrue(torch.allclose(reciprocal_rank(logits, targets, k), zero))
 
     def test_coverage(self):
-        self.assertAlmostEqual(coverage(self.logits, self.k), self.coverage)
-        self.assertAlmostEqual(coverage(self.logits, 2), 4 / 5)
+        self.assertAlmostEqual(coverage(self.logits_torch, self.k), self.coverage)
+        self.assertAlmostEqual(coverage(self.logits_torch, 2), 4 / 5)
+
+    def test_coverage(self):
+        self.assertAlmostEqual(coverage(self.logits_np, self.k), self.coverage)
+        self.assertAlmostEqual(coverage(self.logits_np, 2), 4 / 5)
 
     def test_compute_nested(self):
 
         result = calculate(
             metrics=self.metrics,
-            logits=self.logits,
-            targets=self.targets,
+            logits=self.logits_torch,
+            targets=self.targets_torch,
             k=self.k,
             return_aggregated=True,
             return_individual=True,
@@ -194,8 +236,8 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
 
         result = calculate(
             metrics=self.metrics,
-            logits=self.logits,
-            targets=self.targets,
+            logits=self.logits_torch,
+            targets=self.targets_torch,
             k=self.k,
             return_aggregated=True,
             return_individual=True,
@@ -229,22 +271,20 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
 
         result, best_indices = calculate(
             metrics=self.metrics,
-            logits=self.logits,
-            targets=self.targets,
+            logits=self.logits_torch,
+            targets=self.targets_torch,
             k=self.k,
             return_best_logit_indices=True,
             return_individual=True,
             flatten_results=True,
         )
 
-        self.assertTrue(
-            torch.allclose(best_indices, torch.tensor(self.best_logit_indices))
-        )
+        self.assertTrue(torch.allclose(best_indices, self.best_logit_indices_torch))
 
         result_on_best_logits = calculate(
             metrics=self.metrics,
-            logits=self.logits,
-            targets=self.targets,
+            logits=self.logits_torch,
+            targets=self.targets_torch,
             k=self.k,
             best_logit_indices=best_indices,
             return_best_logit_indices=False,
