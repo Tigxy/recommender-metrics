@@ -24,6 +24,11 @@ jobs:
         run: |
           pip install bump2version
 
+      - name: Configure Git Identity
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+
       - name: Bump version
         run: |
           bump2version --new-version ${{ github.event.inputs.version }} patch
