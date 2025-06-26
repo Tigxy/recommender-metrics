@@ -31,8 +31,14 @@ def __mean(v):
 #     """
 
 
-def _calculate_for_feature(group: UserFeature, metrics: Iterable[MetricEnum], logits: torch.Tensor,
-                           targets: torch.Tensor = None, k: int = 10, return_individual=False):
+def _calculate_for_feature(
+    group: UserFeature,
+    metrics: Iterable[MetricEnum],
+    logits: torch.Tensor,
+    targets: torch.Tensor = None,
+    k: int = 10,
+    return_individual=False,
+):
     """
     Computes the values for a given list of metrics for the users with different demographic features.
     Moreover, pairwise differences between the group metrics are also calculated.
@@ -54,13 +60,17 @@ def _calculate_for_feature(group: UserFeature, metrics: Iterable[MetricEnum], lo
     # calculate metrics for users of a single feature
     for lbl, indices in group:
         t = targets[indices] if targets is not None else None
-        results[f"{group.name}_{lbl}"] = calculate(metrics, logits[indices], t, k, return_individual=return_individual)
+        results[f"{group.name}_{lbl}"] = calculate(
+            metrics, logits[indices], t, k, return_individual=return_individual
+        )
 
     pairs = list(itertools.combinations(group.unique_labels, 2))
     for a, b in pairs:
         pair_results = dict()
         for m in metrics:
-            pair_results[str(m)] = results[f"{group.name}_{a}"][m] - results[f"{group.name}_{b}"][m]
+            pair_results[str(m)] = (
+                results[f"{group.name}_{a}"][m] - results[f"{group.name}_{b}"][m]
+            )
         results[f"{group.name}_{a}-{b}"] = pair_results
     return results
 
@@ -78,10 +88,17 @@ def _dict_difference(first: any, second: any):
         return first - second
 
 
-def calculate_for_feature(group: UserFeature, metrics: Iterable[MetricEnum | str], logits: torch.Tensor,
-                          targets: torch.Tensor = None, k: int | Iterable[int] = 10, return_individual: bool = False,
-                          flatten_results: bool = False, flattened_parts_separator: str = "/",
-                          flattened_results_prefix: str = ""):
+def calculate_for_feature(
+    group: UserFeature,
+    metrics: Iterable[MetricEnum | str],
+    logits: torch.Tensor,
+    targets: torch.Tensor = None,
+    k: int | Iterable[int] = 10,
+    return_individual: bool = False,
+    flatten_results: bool = False,
+    flattened_parts_separator: str = "/",
+    flattened_results_prefix: str = "",
+):
     """
     Computes the values for a given list of metrics for the users with different demographic features.
     Moreover, pairwise differences between the group metrics are also calculated.
@@ -106,17 +123,21 @@ def calculate_for_feature(group: UserFeature, metrics: Iterable[MetricEnum | str
     # calculate metrics for users of a single feature
     for lbl, indices in group:
         t = targets[indices] if targets is not None else None
-        results[f"{group.name}_{lbl}"] = calculate(metrics, logits[indices], t, k,
-                                                   return_individual=return_individual)
+        results[f"{group.name}_{lbl}"] = calculate(
+            metrics, logits[indices], t, k, return_individual=return_individual
+        )
 
     # calculate the differences between features
     pairs = list(itertools.combinations(group.unique_labels, 2))
     for a, b in pairs:
         # only iterate over metrics, and not all values in results, as it might contain
         # results on the user-level as well
-        results[f"{group.name}_{a}-{b}"] = {str(m): _dict_difference(results[f"{group.name}_{a}"][m],
-                                                                     results[f"{group.name}_{b}"][m])
-                                            for m in metrics}
+        results[f"{group.name}_{a}-{b}"] = {
+            str(m): _dict_difference(
+                results[f"{group.name}_{a}"][m], results[f"{group.name}_{b}"][m]
+            )
+            for m in metrics
+        }
 
     if flatten_results:
         flattened_results = dict()
@@ -124,7 +145,11 @@ def calculate_for_feature(group: UserFeature, metrics: Iterable[MetricEnum | str
             for metric, metric_results in group_results.items():
                 for k, results_for_k in metric_results.items():
                     # collect parts out of which final key should be generated
-                    key_parts = [flattened_results_prefix] if flattened_results_prefix else list()
+                    key_parts = (
+                        [flattened_results_prefix]
+                        if flattened_results_prefix
+                        else list()
+                    )
                     key_parts.extend([f"{metric}@{k}", group])
 
                     key = flattened_parts_separator.join(key_parts)

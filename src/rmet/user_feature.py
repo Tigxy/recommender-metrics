@@ -16,9 +16,14 @@ class UserFeature:
         self.unique_labels = tuple(sorted(set(labels)))
 
         self.label_map = {lbl: i for i, lbl in enumerate(self.unique_labels)}
-        self.label_encodings = np.array([self.label_map[lbl] for lbl in labels], dtype=int)
+        self.label_encodings = np.array(
+            [self.label_map[lbl] for lbl in labels], dtype=int
+        )
 
-        self.label_indices_map = {lbl: np.argwhere(self.label_encodings == self.label_map[lbl]).flatten() for lbl in self.unique_labels}
+        self.label_indices_map = {
+            lbl: np.argwhere(self.label_encodings == self.label_map[lbl]).flatten()
+            for lbl in self.unique_labels
+        }
 
     def count(self):
         return {k: len(v) for k, v in self.label_indices_map.items()}

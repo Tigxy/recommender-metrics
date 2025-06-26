@@ -22,8 +22,8 @@ leads to `mean average precision (MAP)` and `mean reciprocal rank (MRR)`, respec
 which are often used in research.*
 
 ## Installation
-- Install it as usual with pip:
-```python -m pip install git+https://github.com/tigxy/recommender-metrics.git```
+- Install via pip:
+```python -m pip install rmet```
 
 - Or from source:
 ```python -m pip install .```
@@ -38,25 +38,34 @@ ndcg(model_output, targets, k=10)
 ```
 Note: `Coverage` does not require the `targets` attribute.
 
-To compute multiple metrics with a single call, check out the `calculte` function,
+To compute multiple metrics with a single call, check out the `calculate` function,
 which accepts a list of metrics to compute:
 ```py
 from rmet import calculate
-calculate(["ndcg", "recall"], model_output, targets, k=10, return_aggregated=False)
+
+calculate(
+    metrics=["ndcg", "recall"], 
+    logits=model_output, 
+    targets=targets, 
+    k=10,
+    return_individual=False,
+    flatten_results=True,
+)
 ```
 
 Sample output:
 ```
 {
- 'ndcg_aggr': 0.479,
- 'recall_aggr': 0.350,
- 'ndcg': tensor([0.0000, 0.4693, 0.4693, 1.0000, 0.7039, 0.2346]),
- 'recall': tensor([0.0000, 0.2500, 0.3333, 0.6000, 0.6667, 0.2500])
+ 'ndcg@10': 0.479,
+ 'recall@10': 0.350
 }
 ```
 
-Here, if `aggregate_results` is set, for each metric the mean of the 
-individual users is calculated.
+If `return_individual` is set, the metrics are also returned on sample level, e.g., for every user, when possible. 
+
+Further, `calculate` allows the efficient computation of metrics for multiple cutoff thresholds `k`, by simply providing a list of numbers instead.
+
+Please check out the functions docstring for the full feature description.
 
 ## Usage metric differences for user features
 
@@ -70,18 +79,29 @@ To do so, you first need to specify which feature belongs to which user via the
 ```py
 from rmet import UserFeature, calculate_for_feature
 ug_gender = UserFeature("gender", ["m", "m", "f", "d", "m"])
-calculate_for_feature(ug_gender, ["ndcg", "recall"], model_output, targets, k=10)
+
+calculate_for_feature(
+    ug_gender, 
+    metrics=["ndcg", "recall"], 
+    logits=model_output, 
+    targets=targets, 
+    k=10,
+    return_individual=False,
+    flatten_results=True,
+)
 ```
 
 Sample output:
 
 ```
-{'gender_f': {'ndcg': 0.195, 'recall': 0.125},
- 'gender_m': {'ndcg': 0.779, 'recall': 0.733},
- 'gender_d': {'ndcg': 0.390, 'recall': 0.458},
- 'gender_f-m': {'ndcg': -0.584, 'recall': -0.608},
- 'gender_f-d': {'ndcg': -0.195, 'recall': -0.333},
- 'gender_m-d': {'ndcg': 0.388, 'recall': 0.275}}
+{
+    'gender_f': {'ndcg@10': 0.195, 'recall@10': 0.125},
+    'gender_m': {'ndcg@10': 0.779, 'recall@10': 0.733},
+    'gender_d': {'ndcg@10': 0.390, 'recall@10': 0.458},
+    'gender_f-m': {'ndcg@10': -0.584, 'recall@10': -0.608},
+    'gender_f-d': {'ndcg@10': -0.195, 'recall@10': -0.333},
+    'gender_m-d': {'ndcg@10': 0.388, 'recall@10': 0.275}
+}
 ```
 
 ## License
