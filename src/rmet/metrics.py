@@ -200,7 +200,8 @@ def hitrate(
 ):
     """
     Computes the Hitrate@k (HR@k) for items.
-    In short, this is the proportion of relevant that could be recommended.
+    In short, this is a simple 0/1 metric that considers whether any of the recommended
+    items are actually relevant.
 
     :param logits: prediction matrix about item relevance
     :param targets: 0/1 matrix encoding true item relevance, same shape as logits
@@ -210,17 +211,7 @@ def hitrate(
     n_relevant_items = _get_n_top_k_relevant(
         logits, targets, k, logits_are_top_indices, sorted=False
     )
-    n_total_relevant = targets.sum(dim=-1)
-
-    # basically a pairwise min(count_relevant_items, k)
-    denominator = torch.where(n_total_relevant > k, k, n_total_relevant)
-
-    # may happen that there are no relevant true items, therefore we need to cover this possible DivisionByZero case.
-    mask = denominator != 0
-    recall = torch.zeros_like(denominator, dtype=torch.float, device=logits.device)
-    recall[mask] = n_relevant_items[mask] / denominator[mask]
-
-    return recall
+    return n_relevant_items.clip(max=1).float()
 
 
 def average_precision(
@@ -312,7 +303,7 @@ def reciprocal_rank(
     # by default, assume reciprocal rank of 0 for all users,
     # which is the case if there is no match in the recommendations,
     # i.e., if lim k->inf, 1/k->0
-    rr = torch.zeros_like(hits.values)
+    rr = torch.zeros_like(hits.values, dtype=torch.float)
     rr[mask] = 1.0 / (hits.indices[mask] + 1).type(
         rr.dtype
     )  # +1 because indices are zero-based, while k is one-based
@@ -427,7 +418,7 @@ def calculate(
     # to speed up computations, only retrieve highest logit indices once (if not already supplied)
     if best_logit_indices is None:
         best_logit_indices = _get_top_k(
-            logits, k, logits_are_top_indices=False, sorted=True
+            logits, max_k, logits_are_top_indices=False, sorted=True
         )
 
     full_prefix = (
