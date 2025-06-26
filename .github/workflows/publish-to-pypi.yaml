@@ -1,13 +1,37 @@
 name: Publish Python 🐍 distribution 📦 to PyPI
 
 on:
-  workflow_run:
-    workflows: ["Run Unit Tests"]
-    branches: [main]
-    types:
-      - completed
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'The version to set'
+        required: true
 
 jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch full history for bump2version to work correctly
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install bump2version
+        run: |
+          pip install bump2version
+
+      - name: Bump version
+        run: |
+          bump2version --new-version ${{ github.event.inputs.version }} patch
+          git push --tags
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build:
     name: Build distribution 📦
     runs-on: ubuntu-latest
