@@ -22,8 +22,8 @@ leads to `mean average precision (MAP)` and `mean reciprocal rank (MRR)`, respec
 which are often used in research.*
 
 ## Installation
-- Install it as usual with pip:
-```python -m pip install git+https://github.com/tigxy/recommender-metrics.git```
+- Install via pip:
+```python -m pip install rmet```
 
 - Or from source:
 ```python -m pip install .```
