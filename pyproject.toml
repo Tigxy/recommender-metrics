@@ -18,6 +18,11 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
+dependencies = [
+    "numpy", 
+    "scipy"
+]
+
 [project.urls]
 Homepage = "https://github.com/tigxy/recommender-metrics"
 Issues = "https://github.com/tigxy/recommender-metrics/issues"
