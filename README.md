@@ -16,6 +16,8 @@ The following metrics are supported (all with the cut-off threshold `k`):
 - Hitrate
 - Coverage
 
+This library focuses on efficient metric implementations for PyTorch tensors, NumPy arrays and sparse arrays.
+
 _Notes_:  
 *\* Averaging `average precision` and `reciprocal rank` of multiple samples 
 leads to `mean average precision (MAP)` and `mean reciprocal rank (MRR)`, respectively, 
