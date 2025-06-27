@@ -1,7 +1,8 @@
 import torch
 import numpy as np
-from typing import Iterable
 from enum import Enum
+import scipy.sparse as sp
+from typing import Iterable
 from collections import defaultdict
 
 
@@ -21,7 +22,7 @@ class MetricEnum(str, Enum):
 
 
 def _assert_supported_type(a: any):
-    if not isinstance(a, (np.ndarray, torch.Tensor )):
+    if not isinstance(a, (np.ndarray, torch.Tensor, sp.csr_array)):
         raise TypeError(f"Type {type(a)} of input not supported.")
 
 
@@ -47,8 +48,70 @@ def _as_float(a: torch.Tensor | np.ndarray):
         _assert_supported_type(a)
 
 
+def _get_top_k_numpy(a: np.ndarray, k: int, sorted: bool = True):
+    # use partition which is much faster than argsort() on big arrays
+    indices_unsorted = np.argpartition(a, -k, axis=-1)[:, -k:]
+    if not sorted:
+        return indices_unsorted
+
+    # sort indices by their values
+    values_unsorted = np.take_along_axis(a, indices_unsorted, axis=-1)
+    sorting = np.argsort(values_unsorted, axis=-1)
+    indices_sorted = np.take_along_axis(indices_unsorted, sorting, axis=-1)
+
+    # reverse order from high to low
+    return indices_sorted[:, ::-1]
+
+
+def _get_top_k_sparse(a: sp.csr_array, k: int):
+    n_rows, n_cols = a.shape
+
+    if k > n_cols:
+        raise ValueError("k must be at most number of columns")
+
+    # create placeholder to fill
+    top_k_indices = np.zeros(shape=(n_rows, k), dtype=int)
+
+    # go row by row over array
+    for i in range(n_rows):
+        row = a[i, :]
+        data = row.data
+
+        if isinstance(row, sp.csr_array):
+            ind = row.indices
+        elif isinstance(row, sp.coo_array):
+            ind = row.coords[0]
+        else:
+            raise TypeError(f"Type {type(row)} for rows in array not expected.")
+
+        # we stay aligned with behaviour of np.argsort, which orders
+        # duplicate values by their indices of occurence (first come first)
+        # note that we need only to consider at most k indices as padding candidates,
+        candidate_padding_indices = np.arange(n_cols - k, n_cols)
+
+        # select those candidates that don't already occur
+        mask = np.isin(candidate_padding_indices, ind, invert=True)
+        padding_indices = candidate_padding_indices[mask]
+        full_indices = np.concatenate([padding_indices, ind])
+
+        # we consider all padding indices to have data=0, which is the default behaviour
+        # for scipy. This way, negative data values are lower ranked than the padded values
+        padding_data = np.zeros_like(padding_indices, dtype=a.dtype)
+
+        # sorting is always required as there might be negative values in original data
+        full_data = np.concatenate([padding_data, data])
+        sorting = np.argsort(full_data)
+        full_indices = full_indices[sorting]
+
+        # select final indices
+        top_k_row = full_indices[-k:][::-1]
+        top_k_indices[i] = top_k_row
+
+    return top_k_indices
+
+
 def _get_top_k(
-    logits: torch.Tensor | np.ndarray,
+    logits: torch.Tensor | np.ndarray | sp.csr_array,
     k=10,
     logits_are_top_indices: bool = False,
     sorted: bool = True,
@@ -69,38 +132,36 @@ def _get_top_k(
             return logits.topk(k, dim=-1, sorted=sorted).indices
 
         elif isinstance(logits, np.ndarray):
-            # use partition which is much faster than argsort() on big arrays
-            indices_unsorted = np.argpartition(logits, -k, axis=-1)[:, -k:]
-            if not sorted:
-                return indices_unsorted
+            return _get_top_k_numpy(logits, k, sorted=sorted)
 
-            # sort indices by their values
-            values_unsorted = np.take_along_axis(logits, indices_unsorted, axis=-1)
-            sorting = np.argsort(values_unsorted, axis=-1)
-            indices_sorted = np.take_along_axis(indices_unsorted, sorting, axis=-1)
+        elif isinstance(logits, sp.csr_array):
+            return _get_top_k_sparse(logits, k)
 
-            # reverse order from high to low
-            return indices_sorted[:, ::-1]
         else:
             _assert_supported_type(logits)
 
 
 def _get_relevancy_scores(
-    targets: torch.Tensor | np.ndarray, indices: torch.Tensor | np.ndarray
+    targets: torch.Tensor | np.ndarray | sp.csr_array,
+    indices: torch.Tensor | np.ndarray,
 ):
     if isinstance(targets, torch.Tensor):
         return torch.gather(targets, dim=-1, index=indices)
 
-    elif isinstance(indices, np.ndarray):
-        return np.take_along_axis(targets, indices, axis=-1)
-
+    elif isinstance(targets, (np.ndarray, sp.csr_array)):
+        scores = np.take_along_axis(targets, indices, axis=-1)
+        # if there are zeros somewhere in the selected range,
+        # take_along_axis returns a sparse array instead of a numpy array
+        if isinstance(scores, sp.csr_array):
+            return scores.todense()
+        return scores
     else:
         _assert_supported_type(targets)
 
 
 def _get_top_k_relevancies(
-    logits: torch.Tensor | np.ndarray,
-    targets: torch.Tensor | np.ndarray,
+    logits: torch.Tensor | np.ndarray | sp.csr_array,
+    targets: torch.Tensor | np.ndarray | sp.csr_array,
     k=10,
     logits_are_top_indices: bool = False,
     sorted: bool = True,
@@ -110,8 +171,8 @@ def _get_top_k_relevancies(
 
 
 def _get_n_top_k_relevant(
-    logits: torch.Tensor | np.ndarray,
-    targets: torch.Tensor | np.ndarray,
+    logits: torch.Tensor | np.ndarray | sp.csr_array,
+    targets: torch.Tensor | np.ndarray | sp.csr_array,
     k=10,
     logits_are_top_indices: bool = False,
     sorted: bool = True,
@@ -123,8 +184,8 @@ def _get_n_top_k_relevant(
 
 
 def dcg(
-    logits: torch.Tensor | np.ndarray,
-    targets: torch.Tensor | np.ndarray,
+    logits: torch.Tensor | np.ndarray | sp.csr_array,
+    targets: torch.Tensor | np.ndarray | sp.csr_array,
     k=10,
     logits_are_top_indices: bool = False,
 ):
@@ -152,9 +213,10 @@ def dcg(
 
     return _as_float(relevancy_scores) @ discount
 
+
 def ndcg(
-    logits: torch.Tensor | np.ndarray,
-    targets: torch.Tensor | np.ndarray,
+    logits: torch.Tensor | np.ndarray | sp.csr_array,
+    targets: torch.Tensor | np.ndarray | sp.csr_array,
     k: int = 10,
     logits_are_top_indices: bool = False,
 ):
@@ -176,8 +238,8 @@ def ndcg(
 
 
 def precision(
-    logits: torch.Tensor | np.ndarray,
-    targets: torch.Tensor | np.ndarray,
+    logits: torch.Tensor | np.ndarray | sp.csr_array,
+    targets: torch.Tensor | np.ndarray | sp.csr_array,
     k: int = 10,
     logits_are_top_indices: bool = False,
 ):
@@ -200,8 +262,8 @@ def precision(
 
 
 def recall(
-    logits: torch.Tensor | np.ndarray,
-    targets: torch.Tensor | np.ndarray,
+    logits: torch.Tensor | np.ndarray | sp.csr_array,
+    targets: torch.Tensor | np.ndarray | sp.csr_array,
     k: int = 10,
     logits_are_top_indices: bool = False,
 ):
@@ -227,8 +289,8 @@ def recall(
 
 
 def f_score(
-    logits: torch.Tensor | np.ndarray,
-    targets: torch.Tensor | np.ndarray,
+    logits: torch.Tensor | np.ndarray | sp.csr_array,
+    targets: torch.Tensor | np.ndarray | sp.csr_array,
     k: int = 10,
     logits_are_top_indices: bool = False,
 ):
@@ -253,8 +315,8 @@ def f_score(
 
 
 def hitrate(
-    logits: torch.Tensor | np.ndarray,
-    targets: torch.Tensor | np.ndarray,
+    logits: torch.Tensor | np.ndarray | sp.csr_array,
+    targets: torch.Tensor | np.ndarray | sp.csr_array,
     k: int = 10,
     logits_are_top_indices: bool = False,
 ):
@@ -275,8 +337,8 @@ def hitrate(
 
 
 def average_precision(
-    logits: torch.Tensor | np.ndarray,
-    targets: torch.Tensor | np.ndarray,
+    logits: torch.Tensor | np.ndarray | sp.csr_array,
+    targets: torch.Tensor | np.ndarray | sp.csr_array,
     k: int = 10,
     logits_are_top_indices: bool = False,
 ):
@@ -318,8 +380,8 @@ def average_precision(
 
 
 def reciprocal_rank(
-    logits: torch.Tensor | np.ndarray,
-    targets: torch.Tensor | np.ndarray,
+    logits: torch.Tensor | np.ndarray | sp.csr_array,
+    targets: torch.Tensor | np.ndarray | sp.csr_array,
     k: int = 10,
     logits_are_top_indices: bool = False,
 ):
@@ -352,10 +414,12 @@ def reciprocal_rank(
         max_indices = max_result.indices
         max_values = max_result.values
 
-    elif isinstance(relevancy_scores, np.ndarray):
+    elif isinstance(relevancy_scores, np.ndarray | sp.csr_array):
         max_indices = np.argmax(relevancy_scores, -1, keepdims=True)
-        max_values = np.take_along_axis(relevancy_scores, max_indices, axis=-1)
-
+        max_values = np.take_along_axis(
+            relevancy_scores, max_indices, axis=-1
+        ).flatten()
+        max_indices = max_indices.flatten()
     else:
         _assert_supported_type(relevancy_scores)
 
@@ -370,15 +434,15 @@ def reciprocal_rank(
 
     denominator = max_indices[mask] + 1
     if isinstance(denominator, torch.Tensor):
-        # pytorch is more strict with matching types, so we'll handle it specially 
-        denominator = denominator.type(rr.dtype) 
+        # pytorch is more strict with matching types, so we'll handle it specially
+        denominator = denominator.type(rr.dtype)
 
     # +1 because indices are zero-based, while k is one-based
     rr[mask] = 1.0 / denominator
     return rr
 
 
-def coverage(logits: torch.Tensor | np.ndarray, k: int = 10):
+def coverage(logits: torch.Tensor | np.ndarray | sp.csr_array, k: int = 10):
     """
     Computes the Coverage@k (Cov@k) for items.
     In short, this is the proportion of all items that are recommended to the users.
@@ -391,7 +455,11 @@ def coverage(logits: torch.Tensor | np.ndarray, k: int = 10):
     return coverage_from_top_k(top_indices, k, n_items)
 
 
-def coverage_from_top_k(top_indices: torch.Tensor | np.ndarray, k: int, n_items: int):
+def coverage_from_top_k(
+    top_indices: torch.Tensor | np.ndarray | sp.csr_array,
+    k: int,
+    n_items: int,
+):
     unique_values = _get_unique_values(top_indices, k)
 
     n_unique_recommended_items = unique_values.shape[0]
@@ -431,8 +499,8 @@ supported_distribution_metrics = tuple(_metric_fn_map_distribution.keys())
 
 def calculate(
     metrics: Iterable[str | MetricEnum],
-    logits: torch.Tensor | np.ndarray = None,
-    targets: torch.Tensor | np.ndarray = None,
+    logits: torch.Tensor | np.ndarray | sp.csr_array = None,
+    targets: torch.Tensor | np.ndarray | sp.csr_array = None,
     k: int | Iterable[int] = 10,
     return_aggregated: bool = True,
     return_individual: bool = False,
@@ -520,7 +588,7 @@ def calculate(
             for k, v in raw_results.items():
                 if not isinstance(v, float):
                     results[k + "_individual"] = v
-                else: 
+                else:
                     # no individual values for global metrics available
                     results[k] = v
 
@@ -545,7 +613,7 @@ def _compute_raw_results(
     k: int,
     best_logit_indices: torch.Tensor | np.ndarray,
     n_items: int,
-    targets: torch.Tensor | np.ndarray = None,
+    targets: torch.Tensor | np.ndarray | sp.csr_array = None,
 ):
     raw_results = {}
     for metric in metrics:
@@ -566,9 +634,9 @@ def _compute_raw_results(
                 mask = torch.argwhere(n_targets).flatten()
                 metric_result = torch.zeros(targets.shape[0], device=targets.device)
 
-            elif isinstance(n_targets, np.ndarray):
+            elif isinstance(n_targets, np.ndarray | sp.csr_array):
                 mask = np.argwhere(n_targets).flatten()
-                metric_result = torch.zeros(targets.shape[0])
+                metric_result = np.zeros(targets.shape[0])
 
             else:
                 _assert_supported_type(n_targets)
@@ -599,7 +667,7 @@ def _aggregate_results(
                 # set degrees of freedom to 1 to have same results as torch
                 results[f"{k}_std"] = np.std(v, ddof=1).item()
 
-        else: 
+        else:
             # nothing to do here, as global metrics are already registered as results before
             pass
 
