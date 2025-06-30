@@ -460,15 +460,14 @@ def coverage_from_top_k(
     k: int,
     n_items: int,
 ):
-    unique_values = _get_unique_values(top_indices, k)
-
+    unique_values = _get_unique_values(top_indices[:, :k])
     n_unique_recommended_items = unique_values.shape[0]
     return n_unique_recommended_items / n_items
 
 
-def _get_unique_values(top_indices, k):
+def _get_unique_values(top_indices):
     if isinstance(top_indices, torch.Tensor):
-        unique_values = top_indices[:, :k].unique(sorted=False)
+        unique_values = top_indices.unique(sorted=False)
 
     elif isinstance(top_indices, np.ndarray):
         unique_values = np.unique(top_indices)
