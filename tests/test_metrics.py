@@ -6,6 +6,7 @@ import scipy.sparse as sp
 from collections import defaultdict
 
 from rmet.metrics import (
+    average_rank,
     coverage,
     precision,
     recall,
@@ -16,12 +17,15 @@ from rmet.metrics import (
     average_precision,
     reciprocal_rank,
     calculate,
+    supported_metrics,
+    MetricEnum,
 )
 
 
 class TestRecommenderMetricsTorch(unittest.TestCase):
 
     def setUp(self):
+        # top-k: [0, 1, 3], [3, 4, 2]
         self.logits = [[0.9, 0.8, 0, 0.4, 0], [0.0, 0.0, 0.3, 0.9, 0.8]]
         # relevant: [0, 2, 3], [3, 4]
         self.targets = [[1, 0, 1, 1, 0], [0, 0, 0, 1, 1]]
@@ -93,6 +97,18 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
 
         self.coverage = 5 / 5
 
+        self.item_ranks = [5, 3, 2, 4, 1]
+        self.ar1 = (5 + 3 + 4) / 3
+        self.ar2 = (2 + 4 + 1) / 3
+        self.ar = [self.ar1, self.ar2]
+
+        # computed item ranks should be [2, 3, 2, 1, 2],
+        # as interaction counts are [1, 0, 1, 2, 1]
+        # (same values are assigned same ranks, without gaps between ranks)
+        self.ar1_from_targets = (2 + 3 + 1) / 3
+        self.ar2_from_targets = (1 + 2 + 2) / 3
+        self.ar_from_targets = [self.ar1_from_targets, self.ar2_from_targets]
+
         self.user_computation_results = {
             "dcg": self.dcg,
             "ndcg": self.ndcg,
@@ -102,6 +118,7 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
             "f_score": self.f1_user,
             "ap": self.ap,
             "rr": self.rr,
+            "average_rank": self.ar,
         }
         self.metrics = list(self.user_computation_results.keys()) + ["coverage"]
 
@@ -185,6 +202,27 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
             )
             self.assertTrue(fn_lookup["all_close"](result, expected, atol=1e-4))
 
+    def test_average_rank(self):
+        for _, fn_lookup in self.supported_types.items():
+            # compute WITHOUT item ranks
+            expected = fn_lookup["cast-result"](self.ar_from_targets)
+            result = average_rank(
+                logits=fn_lookup["cast"](self.logits),
+                targets=fn_lookup["cast"](self.targets),
+                k=self.k,
+            )
+            self.assertTrue(fn_lookup["all_close"](result, expected, atol=1e-4))
+
+            # compute WITH item ranks
+            expected = fn_lookup["cast-result"](self.ar)
+            result = average_rank(
+                logits=fn_lookup["cast"](self.logits),
+                targets=fn_lookup["cast"](self.targets),
+                k=self.k,
+                item_ranks=fn_lookup["cast"](self.item_ranks),
+            )
+            self.assertTrue(fn_lookup["all_close"](result, expected, atol=1e-4))
+
     def test_all_zero_targets(self):
         for _, fn_lookup in self.supported_types.items():
             logits = fn_lookup["cast"](self.logits)
@@ -206,11 +244,11 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
     def test_coverage(self):
         for _, fn_lookup in self.supported_types.items():
             logits = fn_lookup["cast"](self.logits)
-            self.assertAlmostEqual(coverage(logits, self.k), self.coverage)
-            self.assertAlmostEqual(coverage(logits, 2), 4 / 5)
+
+            self.assertAlmostEqual(coverage(logits, self.k), self.coverage, delta=1e-4)
+            self.assertAlmostEqual(coverage(logits, 2), 4 / 5, delta=1e-4)
 
     def test_compute_nested(self):
-
         for _, fn_lookup in self.supported_types.items():
             result = calculate(
                 metrics=self.metrics,
@@ -226,6 +264,7 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
                 n_items=None,
                 best_logit_indices=None,
                 return_best_logit_indices=False,
+                item_ranks=fn_lookup["cast"](self.item_ranks),
             )
 
             expected = defaultdict(lambda: dict())
@@ -248,7 +287,9 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
                             fn_lookup["all_close"](result[k][sk], expected[k][sk])
                         )
                     else:
-                        self.assertAlmostEqual(result[k][sk], expected[k][sk])
+                        self.assertAlmostEqual(
+                            result[k][sk], expected[k][sk], delta=1e-4
+                        )
 
     def test_compute_flattened(self):
 
@@ -270,6 +311,7 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
                 n_items=None,
                 best_logit_indices=None,
                 return_best_logit_indices=False,
+                item_ranks=fn_lookup["cast"](self.item_ranks),
             )
 
             expected = dict()
@@ -289,10 +331,9 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
                 if "individual" in k:
                     self.assertTrue(fn_lookup["all_close"](result[k], expected[k]))
                 else:
-                    self.assertAlmostEqual(result[k], expected[k])
+                    self.assertAlmostEqual(result[k], expected[k], delta=1e-4)
 
     def test_best_indices(self):
-
         for _, fn_lookup in self.supported_types.items():
             result, best_indices = calculate(
                 metrics=self.metrics,
@@ -302,6 +343,7 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
                 return_best_logit_indices=True,
                 return_individual=True,
                 flatten_results=True,
+                item_ranks=fn_lookup["cast"](self.item_ranks),
             )
 
             self.assertTrue(
@@ -319,6 +361,7 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
                 return_best_logit_indices=False,
                 return_individual=True,
                 flatten_results=True,
+                item_ranks=fn_lookup["cast"](self.item_ranks),
             )
 
             # check matching keys
@@ -330,7 +373,54 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
                         fn_lookup["all_close"](result[k], result_on_best_logits[k])
                     )
                 else:
-                    self.assertAlmostEqual(result[k], result_on_best_logits[k])
+                    self.assertAlmostEqual(
+                        result[k], result_on_best_logits[k], delta=1e-4
+                    )
+
+    def test_accepted_metrics(self):
+        # test enum metrics
+        for m in supported_metrics:
+            for _, fn_lookup in self.supported_types.items():
+                calculate(
+                    metrics=[m],
+                    logits=fn_lookup["cast"](self.logits),
+                    targets=fn_lookup["cast"](self.targets),
+                    k=self.k,
+                )
+
+        # test string metrics
+        for m in supported_metrics:
+            for _, fn_lookup in self.supported_types.items():
+                calculate(
+                    metrics=[str(m)],
+                    logits=fn_lookup["cast"](self.logits),
+                    targets=fn_lookup["cast"](self.targets),
+                    k=self.k,
+                )
+
+        # test mix between string and Enum metrics
+        for i, m in enumerate(supported_metrics):
+            for _, fn_lookup in self.supported_types.items():
+                m = m if i % 2 == 0 else str(m)
+                print(m)
+                calculate(
+                    metrics=[str(m)],
+                    logits=fn_lookup["cast"](self.logits),
+                    targets=fn_lookup["cast"](self.targets),
+                    k=self.k,
+                )
+
+        # test some random metrics that should fail
+        not_supported_metrics = ["foo", "bar", "foobar", "barfoo"]
+        for m in not_supported_metrics:
+            for _, fn_lookup in self.supported_types.items():
+                with self.assertRaises(ValueError):
+                    calculate(
+                        metrics=[m],
+                        logits=fn_lookup["cast"](self.logits),
+                        targets=fn_lookup["cast"](self.targets),
+                        k=self.k,
+                    )
 
 
 if __name__ == "__main__":

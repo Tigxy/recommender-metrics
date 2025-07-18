@@ -15,6 +15,7 @@ The following metrics are supported (all with the cut-off threshold `k`):
 - [Reciprocal Rank (RR)*](https://en.wikipedia.org/wiki/Mean_reciprocal_rank)
 - Hitrate
 - Coverage
+- Average Rank
 
 This library focuses on efficient metric implementations for PyTorch tensors, NumPy arrays and sparse arrays.
 

@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from enum import Enum
 import scipy.sparse as sp
+from scipy.stats import rankdata
 from typing import Iterable
 from collections import defaultdict
 
@@ -16,6 +17,7 @@ class MetricEnum(str, Enum):
     Coverage = "coverage"
     AP = "ap"
     RR = "rr"
+    AverageRank = "average_rank"
 
     def __str__(self):
         return self.value
@@ -37,6 +39,16 @@ def _zeros_like_float(a: torch.Tensor | np.ndarray):
         _assert_supported_type(a)
 
 
+def _zeros_float(shape, reference_a):
+    if isinstance(reference_a, torch.Tensor):
+        return torch.zeros(shape, device=reference_a.device)
+
+    elif isinstance(reference_a, np.ndarray | sp.csr_array):
+        return np.zeros(shape)
+    else:
+        _assert_supported_type(reference_a)
+
+
 def _as_float(a: torch.Tensor | np.ndarray):
     if isinstance(a, torch.Tensor):
         return a.float()
@@ -46,6 +58,43 @@ def _as_float(a: torch.Tensor | np.ndarray):
 
     else:
         _assert_supported_type(a)
+
+
+def _stack(a: Iterable[np.ndarray] | Iterable[torch.Tensor]):
+    if len(a) == 0:
+        raise ValueError("Cannot perform stack on empty iterable.")
+
+    if isinstance(a[0], torch.Tensor):
+        return torch.stack(a)
+    else:
+        return np.stack(a)
+
+
+def _generate_non_zero_mask(a: torch.Tensor | np.ndarray, dim=-1):
+    non_zero_counter = a.sum(-1)
+
+    if isinstance(non_zero_counter, torch.Tensor):
+        mask = torch.argwhere(non_zero_counter).flatten()
+
+    elif isinstance(non_zero_counter, np.ndarray | sp.csr_array):
+        mask = np.argwhere(non_zero_counter).flatten()
+
+    else:
+        _assert_supported_type(non_zero_counter)
+
+    return mask
+
+
+def _get_unique_values(top_indices):
+    if isinstance(top_indices, torch.Tensor):
+        unique_values = top_indices.unique(sorted=False)
+
+    elif isinstance(top_indices, np.ndarray):
+        unique_values = np.unique(top_indices)
+
+    else:
+        _assert_supported_type(top_indices)
+    return unique_values
 
 
 def _get_top_k_numpy(a: np.ndarray, k: int, sorted: bool = True):
@@ -442,39 +491,92 @@ def reciprocal_rank(
     return rr
 
 
-def coverage(logits: torch.Tensor | np.ndarray | sp.csr_array, k: int = 10):
+def average_rank(
+    logits: torch.Tensor | np.ndarray | sp.csr_array,
+    targets: torch.Tensor | np.ndarray | sp.csr_array = None,
+    item_ranks: torch.Tensor | np.ndarray | sp.csr_array = None,
+    k=10,
+    logits_are_top_indices: bool = False,
+):
+    """
+    Computes the AverageRank@k (AR@k) for items, which, as the name says, is the
+    average rank of the top k items. Ranks are either computed from the given targets,
+    where increasing item ranks indicate decreasing popularity, or from the given
+    item ranks.
+
+    :param logits: prediction matrix about item relevance
+    :param targets: 0/1 matrix encoding true item relevance, same shape as logits
+    :param k: top k items to consider
+    :param logits_are_top_indices: whether logits are already top-k sorted indices
+    :param item_ranks: 1D item ranks to use for computing the average rank
+
+    :returns: average rank for each sample of the input
+    """
+    if targets is None and item_ranks is None:
+        raise ValueError("Either 'targets' or 'item_ranks' must be given.")
+
+    if item_ranks is None:
+        score_per_item = targets.sum(0)
+        is_tensor_targets = isinstance(targets, torch.Tensor)
+
+        if is_tensor_targets:
+            # need to cast to and from torch tensors, as the rank computation
+            # is not supported for them
+            # https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.rankdata.html
+            score_per_item = score_per_item.detach().cpu().numpy()
+
+        # get ranks from 1 to n_items, where rank 1 has highest score
+        # use "dense" to achieve the same rank for items with same values, but prevents
+        # 'jumps' in ranks for the following items.
+        # E.g., counts [4,4,3,5,1] should lead to [3,3,2,4,1]
+        item_ranks = rankdata(score_per_item, method="dense")
+        # flip ranks so that rank 1 is always most popular, rather than least popular
+        # as this is better for understanding values across different numbers of items
+        item_ranks = max(item_ranks) + 1 - item_ranks
+
+        if is_tensor_targets:
+            item_ranks = torch.tensor(item_ranks, device=targets.device)
+
+    top_indices = _get_top_k(logits, k, logits_are_top_indices, sorted=False)
+
+    # gather item ranks and average them for each user individually (gather requires matching shapes)
+    # this does drop the gradient, but shouldn't be relevant for evaluation metrics
+    # another solution would be to gather on item_ranks.repeat((batch_size, 1)), which
+    # would allocate more memory
+    individual_results = [
+        _as_float(_get_relevancy_scores(item_ranks, ti)).mean(-1) for ti in top_indices
+    ]
+    individual_results = _stack(individual_results)
+    return individual_results
+
+
+def coverage(
+    logits: torch.Tensor | np.ndarray | sp.csr_array,
+    k: int = 10,
+    logits_are_top_indices: bool = False,
+    n_items: int = None,
+):
     """
     Computes the Coverage@k (Cov@k) for items.
     In short, this is the proportion of all items that are recommended to the users.
 
     :param logits: prediction matrix about item relevance
     :param k: top k items to consider
+    :param logits_are_top_indices: whether logits are already top-k sorted indices
+    :param n_items: if logits are top indices, n_items are requried for coverage computation
     """
-    top_indices = _get_top_k(logits, k, logits_are_top_indices=False, sorted=False)
-    n_items = logits.shape[-1]
-    return coverage_from_top_k(top_indices, k, n_items)
+    if logits_are_top_indices and n_items is None:
+        raise ValueError("'n_items' required when using top indices as logits.")
 
+    if not logits_are_top_indices:
+        n_items = logits.shape[-1]
 
-def coverage_from_top_k(
-    top_indices: torch.Tensor | np.ndarray | sp.csr_array,
-    k: int,
-    n_items: int,
-):
+    top_indices = _get_top_k(
+        logits, k, logits_are_top_indices=logits_are_top_indices, sorted=False
+    )
     unique_values = _get_unique_values(top_indices[:, :k])
     n_unique_recommended_items = unique_values.shape[0]
     return n_unique_recommended_items / n_items
-
-
-def _get_unique_values(top_indices):
-    if isinstance(top_indices, torch.Tensor):
-        unique_values = top_indices.unique(sorted=False)
-
-    elif isinstance(top_indices, np.ndarray):
-        unique_values = np.unique(top_indices)
-
-    else:
-        _assert_supported_type(top_indices)
-    return unique_values
 
 
 _metric_fn_map_user = {
@@ -488,11 +590,20 @@ _metric_fn_map_user = {
     MetricEnum.RR: reciprocal_rank,
 }
 
-_metric_fn_map_distribution = {MetricEnum.Coverage: coverage_from_top_k}
+# beyond accuracy metrics may require additional parameters
+# logits, k and logits_are_top_indices are implicitly assumed to be necessary
+_metric_fn_map_user_beyond_accuracy = {
+    MetricEnum.AverageRank: (average_rank, ["targets", "item_ranks"]),
+}
+
+_metric_fn_map_distribution = {MetricEnum.Coverage: coverage}
 
 # List of metrics that are currently supported
 supported_metrics = tuple(MetricEnum)
 supported_user_metrics = tuple(_metric_fn_map_user.keys())
+supported_user_beyond_accuracy_metrics = tuple(
+    _metric_fn_map_user_beyond_accuracy.keys()
+)
 supported_distribution_metrics = tuple(_metric_fn_map_distribution.keys())
 
 
@@ -510,6 +621,7 @@ def calculate(
     n_items: int = None,
     best_logit_indices: torch.Tensor | np.ndarray = None,
     return_best_logit_indices: bool = False,
+    **kwargs,
 ):
     """
     Computes the values for a given list of metrics.
@@ -528,8 +640,10 @@ def calculate(
     :param n_items: Number of items in dataset (in case only best logit indices are supplied)
     :param best_logit_indices: Previously computed indices of the best logits in sorted order
     :param return_best_logit_indices: Whether to return the indices of the best logits
+    :param kwargs: additional parameters that are passed to the beyond-accuracy metrics
+
     :return: a dictionary containing ...
-        {metric_name: value} if 'return_aggregated=True', and/or
+        {<metric_name>: value} if 'return_aggregated=True', and/or
         {<metric_name>_individual: list_of_values} if 'return_individual=True'
     """
 
@@ -537,6 +651,10 @@ def calculate(
     max_k = max(k)
 
     # ensure validity of supplied parameters
+    not_supported_metrics = [m for m in metrics if m not in supported_metrics]
+    if len(not_supported_metrics) > 0:
+        raise ValueError(f"Metrics {not_supported_metrics} are not supported")
+
     if logits is not None and logits.shape[-1] < max_k:
         raise ValueError(
             f"'k' must not be greater than the number of logits "
@@ -579,7 +697,7 @@ def calculate(
     # iterate over all k's and compute the metrics for them
     for ki in k:
         raw_results = _compute_raw_results(
-            metrics, ki, best_logit_indices, n_items, targets
+            metrics, ki, best_logit_indices, n_items, targets, **kwargs
         )
 
         results = {}
@@ -613,41 +731,117 @@ def _compute_raw_results(
     best_logit_indices: torch.Tensor | np.ndarray,
     n_items: int,
     targets: torch.Tensor | np.ndarray | sp.csr_array = None,
+    **kwargs,
 ):
-    raw_results = {}
+    results = {}
+
+    # compute user-based metrics
+    user_metrics_to_compute = set(metrics).intersection(set(_metric_fn_map_user))
+    if len(user_metrics_to_compute):
+        results.update(
+            _compute_user_metrics(
+                metrics=user_metrics_to_compute,
+                k=k,
+                best_logit_indices=best_logit_indices,
+                targets=targets,
+            )
+        )
+
+    # compute user-based beyond accuracy metrics
+    user_beyond_metrics_to_compute = set(metrics).intersection(
+        set(_metric_fn_map_user_beyond_accuracy)
+    )
+    if len(user_beyond_metrics_to_compute):
+        results.update(
+            _compute_user_beyond_accuracy_metrics(
+                metrics=user_beyond_metrics_to_compute,
+                k=k,
+                best_logit_indices=best_logit_indices,
+                targets=targets,
+                **kwargs,
+            )
+        )
+
+    # compute distribution-based metrics
+    distribution_metrics_to_compute = set(metrics).intersection(
+        set(_metric_fn_map_distribution)
+    )
+    if len(distribution_metrics_to_compute):
+        results.update(
+            _compute_distribution_metrics(
+                metrics=distribution_metrics_to_compute,
+                best_logit_indices=best_logit_indices,
+                k=k,
+                n_items=n_items,
+            )
+        )
+
+    return results
+
+
+def _compute_user_metrics(
+    metrics: Iterable[str | MetricEnum],
+    k: int,
+    best_logit_indices: torch.Tensor | np.ndarray,
+    targets: torch.Tensor | np.ndarray | sp.csr_array,
+):
+    results = {}
+
+    if targets is None:
+        raise ValueError(f"'targets' is required to calculate '{metric}'!")
+
+    # do not compute metrics for users where we do not have any
+    # underlying ground truth interactions
+    mask = _generate_non_zero_mask(targets)
+
     for metric in metrics:
-        if metric in _metric_fn_map_distribution:
-            raw_results[str(metric)] = _metric_fn_map_distribution[metric](
-                best_logit_indices, k, n_items
-            )
+        # compute metrics only for users with targets
+        metric_result = _zeros_float(targets.shape[0], targets)
+        metric_result[mask] = _metric_fn_map_user[metric](
+            logits=best_logit_indices[mask],
+            targets=targets[mask],
+            k=k,
+            logits_are_top_indices=True,
+        )
+        results[str(metric)] = metric_result
 
-        elif metric in _metric_fn_map_user:
-            if targets is None:
-                raise ValueError(f"'targets' is required to calculate '{metric}'!")
+    return results
 
-            # do not compute metrics for users where we do not have any
-            # underlying ground truth interactions
-            n_targets = targets.sum(-1)
 
-            if isinstance(n_targets, torch.Tensor):
-                mask = torch.argwhere(n_targets).flatten()
-                metric_result = torch.zeros(targets.shape[0], device=targets.device)
+def _compute_user_beyond_accuracy_metrics(
+    metrics: Iterable[str | MetricEnum],
+    k: int,
+    best_logit_indices: torch.Tensor | np.ndarray,
+    **kwargs,
+):
+    results = {}
+    for metric in metrics:
+        fn, required_params = _metric_fn_map_user_beyond_accuracy[metric]
+        results[str(metric)] = fn(
+            logits=best_logit_indices,
+            k=k,
+            logits_are_top_indices=True,
+            **{p: kwargs.get(p) for p in required_params},
+        )
+    return results
 
-            elif isinstance(n_targets, np.ndarray | sp.csr_array):
-                mask = np.argwhere(n_targets).flatten()
-                metric_result = np.zeros(targets.shape[0])
 
-            else:
-                _assert_supported_type(n_targets)
+def _compute_distribution_metrics(
+    metrics: Iterable[str | MetricEnum],
+    best_logit_indices: torch.Tensor | np.ndarray,
+    k: int,
+    n_items: int,
+):
+    results = {}
+    for metric in metrics:
+        results[str(metric)] = _metric_fn_map_distribution[metric](
+            logits=best_logit_indices,
+            k=k,
+            n_items=n_items,
+            logits_are_top_indices=True,
+        )
 
-            metric_result[mask] = _metric_fn_map_user[metric](
-                best_logit_indices[mask], targets[mask], k, logits_are_top_indices=True
-            )
-            raw_results[str(metric)] = metric_result
-
-        else:
-            raise ValueError(f"Metric '{metric}' not supported.")
-    return raw_results
+    return results
 
 
 def _aggregate_results(
