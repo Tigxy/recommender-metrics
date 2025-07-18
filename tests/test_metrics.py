@@ -122,6 +122,29 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
         }
         self.metrics = list(self.user_computation_results.keys()) + ["coverage"]
 
+    def _assert_nested_results_dictionary_equality(self, d1, d2, is_close_fn):
+        # check matching keys
+        self.assertSetEqual(set(d1.keys()), set(d2.keys()))
+        for k in d1:
+            # check matching subkeys
+            self.assertSetEqual(set(d1[k].keys()), set(d2[k].keys()))
+            for sk in d1[k]:
+                # check matching results
+                if k.endswith("individual"):
+                    self.assertTrue(is_close_fn(d1[k][sk], d2[k][sk]))
+                else:
+                    self.assertAlmostEqual(d1[k][sk], d2[k][sk], delta=1e-4)
+
+    def _assert_flattened_results_dictionary_equality(self, d1, d2, is_close_fn):
+        # check matching keys
+        self.assertSetEqual(set(d1.keys()), set(d2.keys()))
+        for k in d1:
+            # check matching results
+            if "_individual@" in k:
+                self.assertTrue(is_close_fn(d1[k], d2[k]))
+            else:
+                self.assertAlmostEqual(d1[k], d2[k], delta=1e-4)
+
     def test_precision(self):
         for _, fn_lookup in self.supported_types.items():
             expected = fn_lookup["cast-result"](self.precision)
@@ -275,21 +298,9 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
                 expected[f"{m}_std"][self.k] = np.std(r, ddof=1)
             expected.update({"coverage": {self.k: self.coverage}})
 
-            # check matching keys
-            self.assertSetEqual(set(result.keys()), set(expected.keys()))
-            for k in result:
-                # check matching subkeys
-                self.assertSetEqual(set(result[k].keys()), set(expected[k].keys()))
-                for sk in result[k]:
-                    # check matching results
-                    if k.endswith("individual"):
-                        self.assertTrue(
-                            fn_lookup["all_close"](result[k][sk], expected[k][sk])
-                        )
-                    else:
-                        self.assertAlmostEqual(
-                            result[k][sk], expected[k][sk], delta=1e-4
-                        )
+            self._assert_nested_results_dictionary_equality(
+                result, expected, fn_lookup["all_close"]
+            )
 
     def test_compute_flattened(self):
 
@@ -324,14 +335,9 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
                 expected[f"{prefix}{separator}{m}_std@{self.k}"] = np.std(k, ddof=1)
             expected.update({f"{prefix}{separator}coverage@{self.k}": self.coverage})
 
-            # check matching keys
-            self.assertSetEqual(set(result.keys()), set(expected.keys()))
-            for k in result:
-                # check matching results
-                if "individual" in k:
-                    self.assertTrue(fn_lookup["all_close"](result[k], expected[k]))
-                else:
-                    self.assertAlmostEqual(result[k], expected[k], delta=1e-4)
+            self._assert_flattened_results_dictionary_equality(
+                result, expected, fn_lookup["all_close"]
+            )
 
     def test_best_indices(self):
         for _, fn_lookup in self.supported_types.items():
@@ -364,18 +370,31 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
                 item_ranks=fn_lookup["cast"](self.item_ranks),
             )
 
-            # check matching keys
-            self.assertSetEqual(set(result.keys()), set(result_on_best_logits.keys()))
-            for k in result:
-                # check matching results
-                if "individual" in k:
-                    self.assertTrue(
-                        fn_lookup["all_close"](result[k], result_on_best_logits[k])
-                    )
-                else:
-                    self.assertAlmostEqual(
-                        result[k], result_on_best_logits[k], delta=1e-4
-                    )
+            self._assert_flattened_results_dictionary_equality(
+                result, result_on_best_logits, fn_lookup["all_close"]
+            )
+
+    def test_single_metric_vs_list(self):
+        # test string metrics
+        for m in supported_metrics:
+            for _, fn_lookup in self.supported_types.items():
+                r_single_metric = calculate(
+                    metrics=m,
+                    logits=fn_lookup["cast"](self.logits),
+                    targets=fn_lookup["cast"](self.targets),
+                    k=self.k,
+                )
+
+                r_metrics_list = calculate(
+                    metrics=m,
+                    logits=fn_lookup["cast"](self.logits),
+                    targets=fn_lookup["cast"](self.targets),
+                    k=self.k,
+                )
+
+                self._assert_nested_results_dictionary_equality(
+                    r_single_metric, r_metrics_list, fn_lookup["all_close"]
+                )
 
     def test_accepted_metrics(self):
         # test enum metrics

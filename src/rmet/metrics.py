@@ -608,7 +608,7 @@ supported_distribution_metrics = tuple(_metric_fn_map_distribution.keys())
 
 
 def calculate(
-    metrics: Iterable[str | MetricEnum],
+    metrics: str | Iterable[str | MetricEnum],
     logits: torch.Tensor | np.ndarray | sp.csr_array = None,
     targets: torch.Tensor | np.ndarray | sp.csr_array = None,
     k: int | Iterable[int] = 10,
@@ -626,7 +626,8 @@ def calculate(
     """
     Computes the values for a given list of metrics.
 
-    :param metrics: The list of metrics to compute. Check out 'supported_metrics' for a list of names.
+    :param metrics: Metric name or list of metrics to compute. Check out 'supported_metrics'
+                    for a list of all available metrics.
     :param logits: prediction matrix about item relevance
     :param targets: 0/1 matrix encoding true item relevance, same shape as logits
     :param k: top k items to consider
@@ -649,6 +650,10 @@ def calculate(
 
     k = (k,) if isinstance(k, int) else k
     max_k = max(k)
+
+    # wrap single metrics in a tuple so that the remaining pipeline works as expected.
+    # resulting dictionary output should not change
+    metrics = (metrics,) if isinstance(metrics, str) else metrics
 
     # ensure validity of supplied parameters
     not_supported_metrics = [m for m in metrics if m not in supported_metrics]
