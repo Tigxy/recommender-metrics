@@ -833,8 +833,8 @@ def _compute_user_beyond_accuracy_metrics(
 
 def _compute_distribution_metrics(
     metrics: Iterable[str | MetricEnum],
-    best_logit_indices: torch.Tensor | np.ndarray,
     k: int,
+    best_logit_indices: torch.Tensor | np.ndarray,
     n_items: int,
 ):
     results = {}
