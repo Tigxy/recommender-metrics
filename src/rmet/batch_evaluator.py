@@ -45,14 +45,13 @@ class BatchEvaluator:
         """
         Initializes a BatchEvaluator instance based on the provided config.
 
-        Params:
-        - metrics:          Metric name or list of metrics to compute. Check out 'supported_metrics'
-                            for a list of all available metrics.
-        - k:                Top k items to consider
-        - calculate_std:    Whether to calculate the standard deviation for the aggregated results
-        - n_items:          Number of items in dataset, in case targets do not contain 'labels' for all items
-        - metric_prefix:    Prefix for the computed metrics
-        - kwargs:           Additional parameters that are passed to metric computations, e.g., item_ranks
+        :param metrics:         Metric name or list of metrics to compute. Check out 'supported_metrics'
+                                for a list of all available metrics.
+        :param k:               Top k items to consider
+        :param calculate_std:   Whether to calculate the standard deviation for the aggregated results
+        :param n_items:         Number of items in dataset, in case targets do not contain 'labels' for all items
+        :param metric_prefix:   Prefix for the computed metrics
+        :param kwargs:          Additional parameters that are passed to metric computations, e.g., item_ranks
         """
         self.metrics = metrics
         self.top_k = top_k
@@ -164,10 +163,9 @@ class BatchEvaluator:
         Evaluates a batch of logits and their true targets and stores the results internally.
         To retrieve the results, call `get_results`.
 
-        Params:
-        - user_indices: indices of users in batch
-        - logits: predicted ratings, expected shape is (batch_size, n_items)
-        - targets: target ratings, expected  (batch_size, n_items)
+        :param user_indices:    indices of users in batch
+        :param logits:          predicted ratings, expected shape is (batch_size, n_items)
+        :param targets:         target ratings, expected  (batch_size, n_items)
         """
         if logits.shape != targets.shape:
             raise ValueError(
@@ -199,9 +197,8 @@ class BatchEvaluator:
         """
         Retrieves all user- and distribution-based results.
 
-        Params:
-        - reset_state: Whether to reset internal memory. If true, `get_results` can only
-                       be called once.
+        :param reset_state: Whether to reset internal memory. If true, `get_results` can only
+                            be called once.
         """
         if not self._are_results_available:
             raise RuntimeError(
