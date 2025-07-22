@@ -9,9 +9,10 @@ from collections import defaultdict
 from .metrics import (
     calculate,
     supported_metrics,
-    supported_user_metrics,
-    supported_distribution_metrics,
+    supported_user_accuracy_metrics,
+    supported_global_metrics,
     supported_user_beyond_accuracy_metrics,
+    _std,
 )
 
 
@@ -35,6 +36,7 @@ class BatchEvaluator:
         top_k: Iterable[int],
         calculate_std: bool = True,
         n_items: int = None,
+        metric_prefix: str = "",
         **kwargs,
     ):
         """
@@ -46,6 +48,7 @@ class BatchEvaluator:
         - k:                Top k items to consider
         - calculate_std:    Whether to calculate the standard deviation for the aggregated results
         - n_items:          Number of items in dataset, in case targets do not contain 'labels' for all items
+        - metric_prefix:    Prefix for the computed metrics
         - kwargs:           Additional parameters that are passed to metric computations, e.g., item_ranks
         """
         self.metrics = metrics
@@ -53,6 +56,7 @@ class BatchEvaluator:
         self.calculate_std = calculate_std
 
         self.n_items = n_items
+        self.metric_prefix = metric_prefix
         self.calculation_kwargs = kwargs
 
         # ensure that only valid metrics are supplied
@@ -69,25 +73,25 @@ class BatchEvaluator:
         # Note: We don't want to compute everything at the end, as we might not be able
         #       to make use GPU computations like that.
         self._user_metrics = set(self.metrics).intersection(
-            set(supported_user_metrics).union(supported_user_beyond_accuracy_metrics)
+            set(supported_user_accuracy_metrics).union(
+                supported_user_beyond_accuracy_metrics
+            )
         )
-        self._dist_metrics = set(self.metrics).intersection(
-            supported_distribution_metrics
-        )
+        self._dist_metrics = set(self.metrics).intersection(supported_global_metrics)
 
         self._are_results_available = False
         self._user_indices = None
         self._user_top_k = None
 
         # internal storage for the results
-        self._user_metric_results = None
+        self._user_level_results = None
         self._reset_internal_dict()
 
     def _reset_internal_dict(self):
         """
         Resets the internal memory on computed and gathered metrics.
         """
-        self._user_metric_results = defaultdict(lambda: list())
+        self._user_level_results = defaultdict(lambda: list())
         self._user_indices = list()
         self._user_top_k = list()
         self._are_results_available = False
@@ -101,37 +105,33 @@ class BatchEvaluator:
         for metric_name, metric_values in results.items():
             if isinstance(metric_values, torch.Tensor):
                 metric_values = metric_values.detach().cpu().numpy()
-            self._user_metric_results[metric_name].append(metric_values)
-
-    @staticmethod
-    def _filter_rename_individual(d: dict):
-        """
-        Helper function to drop the "_individual" part raw metrics provided
-        by metrics library.
-        """
-        return {
-            k.replace("_individual", ""): v for k, v in d.items() if "_individual" in k
-        }
+            self._user_level_results[metric_name].append(metric_values)
 
     def _calculate_user_metrics(self, logits: torch.Tensor, y_true: torch.Tensor):
         """
         Wrapper function to compute user-based metrics, e.g., recall and precision
         """
-        results, top_k_indices = calculate(
+        user_level_results, top_k_indices = calculate(
             metrics=self._user_metrics,
             logits=logits,
             targets=y_true,
             k=self.top_k,
             return_aggregated=False,
-            return_individual=True,
+            return_per_user=True,
             flatten_results=True,
-            flattened_results_prefix="",
+            flatten_prefix=self.metric_prefix,
             n_items=self.n_items,
             return_best_logit_indices=True,
             **self.calculation_kwargs,
         )
-        user_metrics = self._filter_rename_individual(results)
-        return user_metrics, top_k_indices
+
+        # drop the "_user" part as it's not relevant for us
+        user_level_results = {
+            k.replace("_user", ""): v
+            for k, v in user_level_results.items()
+            if k.endswith("_user")
+        }
+        return user_level_results, top_k_indices
 
     def _calculate_distribution_metrics(self, user_top_k):
         """
@@ -141,9 +141,9 @@ class BatchEvaluator:
             metrics=self._dist_metrics,
             k=self.top_k,
             return_aggregated=True,
-            return_individual=True,
+            return_per_user=False,
             flatten_results=True,
-            flattened_results_prefix="",
+            flatten_prefix=self.metric_prefix,
             best_logit_indices=user_top_k,
             n_items=self.n_items,
             **self.calculation_kwargs,
@@ -213,39 +213,37 @@ class BatchEvaluator:
             user_top_k = torch.cat(self._user_top_k)
             user_indices = torch.cat(self._user_indices)
 
-        aggregated_metrics, user_metrics = {}, {}
+        aggregated_results, user_level_results = {}, {}
         if len(self._user_metrics) > 0:
             # join user metrics across all batches
-            user_metrics = {
-                k: np.concatenate(v) for k, v in self._user_metric_results.items()
+            user_level_results = {
+                k: np.concatenate(v) for k, v in self._user_level_results.items()
             }
             # aggregate the results
-            aggregated_metrics = {k: v.mean().item() for k, v in user_metrics.items()}
+            aggregated_results = {
+                k: v.mean().item() for k, v in user_level_results.items()
+            }
             if self.calculate_std:
-                aggregated_metrics.update(
-                    # ddof=1 to match metrics library
-                    {
-                        f"{k}_std": np.std(v, ddof=1).item()
-                        for k, v in user_metrics.items()
-                    }
+                aggregated_results.update(
+                    {f"{k}_std": _std(v) for k, v in user_level_results.items()}
                 )
 
         # calculate distribution metrics
         if len(self._dist_metrics) > 0:
-            distribution_metrics = self._calculate_distribution_metrics(user_top_k)
-            aggregated_metrics.update(distribution_metrics)
+            distribution_results = self._calculate_distribution_metrics(user_top_k)
+            aggregated_results.update(distribution_results)
 
         # employ natural sorting on metrics, so that, e.g., @20 comes before @100
-        aggregated_metrics = {
-            k: aggregated_metrics[k] for k in natsorted(aggregated_metrics.keys())
+        aggregated_results = {
+            k: aggregated_results[k] for k in natsorted(aggregated_results.keys())
         }
 
         if reset_state:
             self._reset_internal_dict()
 
         return EvaluatorResults(
-            aggregated_metrics=aggregated_metrics,
-            user_level_metrics=user_metrics,
+            aggregated_metrics=aggregated_results,
+            user_level_metrics=user_level_results,
             user_indices=user_indices,
             user_top_k=user_top_k,
         )

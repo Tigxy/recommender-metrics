@@ -61,7 +61,7 @@ def _calculate_for_feature(
     for lbl, indices in group:
         t = targets[indices] if targets is not None else None
         results[f"{group.name}_{lbl}"] = calculate(
-            metrics, logits[indices], t, k, return_individual=return_individual
+            metrics, logits[indices], t, k, return_per_user=return_individual
         )
 
     pairs = list(itertools.combinations(group.unique_labels, 2))
@@ -124,7 +124,7 @@ def calculate_for_feature(
     for lbl, indices in group:
         t = targets[indices] if targets is not None else None
         results[f"{group.name}_{lbl}"] = calculate(
-            metrics, logits[indices], t, k, return_individual=return_individual
+            metrics, logits[indices], t, k, return_per_user=return_individual
         )
 
     # calculate the differences between features

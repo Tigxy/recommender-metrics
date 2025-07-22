@@ -123,30 +123,21 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
         }
         self.metrics = list(self.user_computation_results.keys()) + ["coverage"]
 
-    def _assert_nested_results_dictionary_equality(self, d1, d2, is_close_fn):
+    def _assert_dictionary_equality(self, d1, d2, is_close_fn):
         # check matching keys
+        self.assertEqual(type(d1), type(d2))
         self.assertSetEqual(set(d1.keys()), set(d2.keys()))
         for k in d1:
-            # check matching subkeys
-            self.assertSetEqual(set(d1[k].keys()), set(d2[k].keys()))
-            for sk in d1[k]:
-                # check matching results
-                self.assertEqual(type(d1[k][sk]), type(d2[k][sk]))
-                if isinstance(d1[k][sk], (np.ndarray, torch.Tensor)):
-                    self.assertTrue(is_close_fn(d1[k][sk], d2[k][sk]))
-                else:
-                    self.assertAlmostEqual(d1[k][sk], d2[k][sk], delta=1e-4)
-
-    def _assert_flattened_results_dictionary_equality(self, d1, d2, is_close_fn):
-        # check matching keys
-        self.assertSetEqual(set(d1.keys()), set(d2.keys()))
-        for k in d1:
-            # check matching results
-            self.assertEqual(type(d1[k]), type(d2[k]))
-            if isinstance(d1[k], (np.ndarray, torch.Tensor)):
-                self.assertTrue(is_close_fn(d1[k], d2[k]))
+            # dict might be nested
+            if isinstance(d1[k], dict):
+                self._assert_dictionary_equality(d1[k], d2[k], is_close_fn)
             else:
-                self.assertAlmostEqual(d1[k], d2[k], delta=1e-4)
+                # check matching results
+                self.assertEqual(type(d1[k]), type(d2[k]))
+                if isinstance(d1[k], (np.ndarray, torch.Tensor)):
+                    self.assertTrue(is_close_fn(d1[k], d2[k]))
+                else:
+                    self.assertAlmostEqual(d1[k], d2[k], delta=1e-4)
 
     def test_precision(self):
         for _, fn_lookup in self.supported_types.items():
@@ -282,33 +273,30 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
                 targets=fn_lookup["cast"](self.targets),
                 k=self.k,
                 return_aggregated=True,
-                return_individual=True,
+                return_per_user=True,
                 calculate_std=True,
                 flatten_results=False,
-                flattened_parts_separator=None,
-                flattened_results_prefix=None,
                 n_items=None,
                 best_logit_indices=None,
                 return_best_logit_indices=False,
                 item_ranks=fn_lookup["cast"](self.item_ranks),
             )
 
-            expected = defaultdict(lambda: dict())
+            expected = defaultdict(lambda: defaultdict(lambda: dict()))
             for m, r in self.user_computation_results.items():
-                expected[f"{m}_individual"][self.k] = fn_lookup["cast-result"](r)
-                expected[m][self.k] = np.mean(r).item()
+                expected[m][self.k]["user"] = fn_lookup["cast-result"](r)
+                expected[m][self.k]["mean"] = np.mean(r).item()
                 # ddof to adjust to degrees of freedom = 1 for std computation in PyTorch
-                expected[f"{m}_std"][self.k] = np.std(r, ddof=1).item()
-            expected.update({"coverage": {self.k: self.coverage}})
+                expected[m][self.k]["std"] = np.std(r, ddof=1).item()
+            expected.update({"coverage": {self.k: {"global": self.coverage}}})
+            # transform to normal dictionary
+            expected = {k: dict(v) for k, v in expected.items()}
 
-            self._assert_nested_results_dictionary_equality(
-                result, expected, fn_lookup["all_close"]
-            )
+            self._assert_dictionary_equality(result, expected, fn_lookup["all_close"])
 
     def test_compute_flattened(self):
 
-        separator = "_|_"
-        prefix = "<my-prefix>"
+        prefix = "<my-prefix>/"
 
         for _, fn_lookup in self.supported_types.items():
             result = calculate(
@@ -317,11 +305,10 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
                 targets=fn_lookup["cast"](self.targets),
                 k=self.k,
                 return_aggregated=True,
-                return_individual=True,
+                return_per_user=True,
                 calculate_std=True,
                 flatten_results=True,
-                flattened_parts_separator=separator,
-                flattened_results_prefix=prefix,
+                flatten_prefix=prefix,
                 n_items=None,
                 best_logit_indices=None,
                 return_best_logit_indices=False,
@@ -330,19 +317,14 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
 
             expected = dict()
             for m, k in self.user_computation_results.items():
-                expected[f"{prefix}{separator}{m}_individual@{self.k}"] = fn_lookup[
-                    "cast-result"
-                ](k)
-                expected[f"{prefix}{separator}{m}@{self.k}"] = np.mean(k).item()
+                metric_name = f"{prefix}{m}@{self.k}"
+                expected[f"{metric_name}_user"] = fn_lookup["cast-result"](k)
+                expected[metric_name] = np.mean(k).item()
                 # ddof to adjust to degrees of freedom = 1 for std computation in PyTorch
-                expected[f"{prefix}{separator}{m}_std@{self.k}"] = np.std(
-                    k, ddof=1
-                ).item()
-            expected.update({f"{prefix}{separator}coverage@{self.k}": self.coverage})
+                expected[f"{metric_name}_std"] = np.std(k, ddof=1).item()
+            expected.update({f"{prefix}coverage@{self.k}": self.coverage})
 
-            self._assert_flattened_results_dictionary_equality(
-                result, expected, fn_lookup["all_close"]
-            )
+            self._assert_dictionary_equality(result, expected, fn_lookup["all_close"])
 
     def test_best_indices(self):
         for _, fn_lookup in self.supported_types.items():
@@ -352,7 +334,7 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
                 targets=fn_lookup["cast"](self.targets),
                 k=self.k,
                 return_best_logit_indices=True,
-                return_individual=True,
+                return_per_user=True,
                 flatten_results=True,
                 item_ranks=fn_lookup["cast"](self.item_ranks),
             )
@@ -370,12 +352,12 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
                 k=self.k,
                 best_logit_indices=best_indices,
                 return_best_logit_indices=False,
-                return_individual=True,
+                return_per_user=True,
                 flatten_results=True,
                 item_ranks=fn_lookup["cast"](self.item_ranks),
             )
 
-            self._assert_flattened_results_dictionary_equality(
+            self._assert_dictionary_equality(
                 result, result_on_best_logits, fn_lookup["all_close"]
             )
 
@@ -397,7 +379,7 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
                     k=self.k,
                 )
 
-                self._assert_nested_results_dictionary_equality(
+                self._assert_dictionary_equality(
                     r_single_metric, r_metrics_list, fn_lookup["all_close"]
                 )
 
@@ -483,10 +465,10 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
                 ).item()
             expected.aggregated_metrics.update({f"coverage@{self.k}": self.coverage})
 
-            self._assert_flattened_results_dictionary_equality(
+            self._assert_dictionary_equality(
                 result.user_level_metrics, expected.user_level_metrics, np.allclose
             )
-            self._assert_flattened_results_dictionary_equality(
+            self._assert_dictionary_equality(
                 result.aggregated_metrics, expected.aggregated_metrics, np.allclose
             )
 

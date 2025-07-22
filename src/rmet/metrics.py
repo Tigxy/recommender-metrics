@@ -74,27 +74,36 @@ def _generate_non_zero_mask(a: torch.Tensor | np.ndarray, dim=-1):
     non_zero_counter = a.sum(-1)
 
     if isinstance(non_zero_counter, torch.Tensor):
-        mask = torch.argwhere(non_zero_counter).flatten()
+        return torch.argwhere(non_zero_counter).flatten()
 
     elif isinstance(non_zero_counter, np.ndarray | sp.csr_array):
-        mask = np.argwhere(non_zero_counter).flatten()
+        return np.argwhere(non_zero_counter).flatten()
 
     else:
         _assert_supported_type(non_zero_counter)
 
-    return mask
 
-
-def _get_unique_values(top_indices):
+def _get_unique_values(top_indices: torch.Tensor | np.ndarray):
     if isinstance(top_indices, torch.Tensor):
-        unique_values = top_indices.unique(sorted=False)
+        return top_indices.unique(sorted=False)
 
     elif isinstance(top_indices, np.ndarray):
-        unique_values = np.unique(top_indices)
+        return np.unique(top_indices)
 
     else:
         _assert_supported_type(top_indices)
-    return unique_values
+
+
+def _std(a: torch.Tensor | np.ndarray):
+    if isinstance(a, torch.Tensor):
+        return torch.std(a).item()
+
+    elif isinstance(a, np.ndarray):
+        # set degrees of freedom to 1 to have same results as torch
+        return np.std(a, ddof=1).item()
+
+    else:
+        _assert_supported_type(top_indices)
 
 
 def _get_top_k_numpy(a: np.ndarray, k: int, sorted: bool = True):
@@ -579,7 +588,7 @@ def coverage(
     return n_unique_recommended_items / n_items
 
 
-_metric_fn_map_user = {
+_metric_fn_map_user_accuracy = {
     MetricEnum.DCG: dcg,
     MetricEnum.NDCG: ndcg,
     MetricEnum.Recall: recall,
@@ -596,15 +605,18 @@ _metric_fn_map_user_beyond_accuracy = {
     MetricEnum.AverageRank: (average_rank, ["targets", "item_ranks"]),
 }
 
-_metric_fn_map_distribution = {MetricEnum.Coverage: coverage}
+_metric_fn_map_global = {MetricEnum.Coverage: coverage}
 
 # List of metrics that are currently supported
 supported_metrics = tuple(MetricEnum)
-supported_user_metrics = tuple(_metric_fn_map_user.keys())
+supported_user_accuracy_metrics = tuple(_metric_fn_map_user_accuracy.keys())
 supported_user_beyond_accuracy_metrics = tuple(
     _metric_fn_map_user_beyond_accuracy.keys()
 )
-supported_distribution_metrics = tuple(_metric_fn_map_distribution.keys())
+supported_user_metrics = (
+    supported_user_accuracy_metrics + supported_user_beyond_accuracy_metrics
+)
+supported_global_metrics = tuple(_metric_fn_map_global.keys())
 
 
 def calculate(
@@ -613,11 +625,10 @@ def calculate(
     targets: torch.Tensor | np.ndarray | sp.csr_array = None,
     k: int | Iterable[int] = 10,
     return_aggregated: bool = True,
-    return_individual: bool = False,
+    return_per_user: bool = False,
     calculate_std: bool = False,
     flatten_results: bool = False,
-    flattened_parts_separator: str = "/",
-    flattened_results_prefix: str = "",
+    flatten_prefix: str = "",
     n_items: int = None,
     best_logit_indices: torch.Tensor | np.ndarray = None,
     return_best_logit_indices: bool = False,
@@ -626,26 +637,31 @@ def calculate(
     """
     Computes the values for a given list of metrics.
 
-    :param metrics: Metric name or list of metrics to compute. Check out 'supported_metrics'
-                    for a list of all available metrics.
-    :param logits: prediction matrix about item relevance
-    :param targets: 0/1 matrix encoding true item relevance, same shape as logits
-    :param k: top k items to consider
-    :param return_aggregated: Whether aggregated metric results should be returned.
-    :param return_individual: Whether the results for individual users should be returned
-    :param calculate_std: Whether to calculate the standard deviation for the aggregated results
-    :param flatten_results: Whether to flatten the results' dictionary.
-                            Key is of format "{prefix}/{metric}@{k}" for separator "/"
-    :param flattened_parts_separator: How to separate the individual parts of the flattened key
-    :param flattened_results_prefix: Prefix to prepend to the flattened results key.
-    :param n_items: Number of items in dataset (in case only best logit indices are supplied)
-    :param best_logit_indices: Previously computed indices of the best logits in sorted order
-    :param return_best_logit_indices: Whether to return the indices of the best logits
-    :param kwargs: additional parameters that are passed to the beyond-accuracy metrics
+    :param metrics:             Metric name or list of metrics to compute. Check out
+                                'supported_metrics' for a list of all available metrics.
+    :param logits:              prediction matrix about item relevance
+    :param targets:             0/1 matrix encoding true item relevance, same shape as logits
+    :param k:                   levels of "top-k" items to consider in the calculation
+    :param return_aggregated:   whether aggregated metric results should be returned.
+    :param return_per_user:     whether the results for individual users should be returned
+    :param calculate_std:       whether to calculate the standard deviation for the aggregated results
+    :param flatten_results:     whether to flatten the results' dictionary.
+    :param flatten_prefix:      prefix to use for flattened results, e.g., to differentiate between
+                                different splits
+    :param n_items:             number of items in dataset (in case only best logit indices are supplied)
+    :param best_logit_indices:  previously computed indices of the best logits in sorted order
+    :param return_best_logit_indices:   whether to return the indices of the best logits
+    :param kwargs:                      additional parameters that are passed to the beyond-accuracy metrics
 
-    :return: a dictionary containing ...
-        {<metric_name>: value} if 'return_aggregated=True', and/or
-        {<metric_name>_individual: list_of_values} if 'return_individual=True'
+    :return: a nested dictionary depending of structure {`metric`: {`k`: {`key`: `value`}}},
+             where `key` depends on the metric and parameters:
+             - "user":   ..., # for user-based metrics if 'return_per_user'
+             - "mean":   ..., # for user-based metrics if 'return_aggregated'
+             - "std":    ..., # for user-based metrics if 'return_aggregated' and 'calculate_std'
+             - "global": ..., # for global metrics
+             or a nested dictionary with keys in the format
+             - `{flatten_prefix}{metric}@{k}`        # for "mean" and "global" keys due to their importance
+             - `{flatten_prefix}{metric}@{k}_{key}`  # for "std" and "user" keys
     """
 
     k = (k,) if isinstance(k, int) else k
@@ -680,9 +696,9 @@ def calculate(
             f"Logits and targets must be of same shape ({logits.shape} != {targets.shape})"
         )
 
-    if not (return_individual or return_aggregated):
+    if not (return_per_user or return_aggregated):
         raise ValueError(
-            f"Specify either 'return_individual' or 'return_aggregated' to receive results."
+            f"Specify either 'return_per_user' or 'return_aggregated' to receive results."
         )
 
     n_items = n_items or logits.shape[-1]
@@ -692,59 +708,99 @@ def calculate(
             logits, max_k, logits_are_top_indices=False, sorted=True
         )
 
-    full_prefix = (
-        f"{flattened_results_prefix}{flattened_parts_separator}"
-        if flattened_results_prefix
-        else ""
+    # first compute on user-level metrics
+    user_metrics = _compute_user_metrics(
+        metrics=set(metrics).intersection(set(supported_user_metrics)),
+        k=k,
+        best_logit_indices=best_logit_indices,
+        targets=targets,
+        **kwargs,
     )
 
-    metric_results = dict() if flatten_results else defaultdict(lambda: dict())
-    # iterate over all k's and compute the metrics for them
-    for ki in k:
-        raw_results = _compute_raw_results(
-            metrics, ki, best_logit_indices, n_items, targets, **kwargs
-        )
+    # gather all user-based metrics into single dict
+    metric_results = defaultdict(lambda: defaultdict(lambda: dict()))
+    for m, per_metric_results in user_metrics.items():
+        for ki, per_k_results in per_metric_results.items():
+            if return_per_user:
+                metric_results[m][ki]["user"] = per_k_results
 
-        results = {}
-        if return_individual:
-            for k, v in raw_results.items():
-                if not isinstance(v, float):
-                    results[k + "_individual"] = v
-                else:
-                    # no individual values for global metrics available
-                    results[k] = v
+            if return_aggregated:
+                metric_results[m][ki]["mean"] = per_k_results.mean().item()
+                if calculate_std:
+                    metric_results[m][ki]["std"] = _std(per_k_results)
 
-        if return_aggregated:
-            aggregated_results = _aggregate_results(raw_results, calculate_std)
-            results.update(aggregated_results)
+    # compute global-based metrics
+    global_results = _compute_global_metrics(
+        metrics=set(metrics).intersection(set(_metric_fn_map_global)),
+        best_logit_indices=best_logit_indices,
+        k=k,
+        n_items=n_items,
+    )
+    # ... and add them to results collection
+    for m, per_metric_results in global_results.items():
+        for ki, k_result in per_metric_results.items():
+            metric_results[m][ki]["global"] = k_result
 
-        for metric, v in results.items():
-            if flatten_results:
-                metric_results[f"{full_prefix}{metric}@{ki}"] = v
-            else:
-                metric_results[metric][ki] = v
+    if flatten_results:
+        final_results = dict()
+        # iterate over all results and flatten them in single dictionary
+        for m, per_metric_results in metric_results.items():
+            for ki, per_k_results in per_metric_results.items():
+                for key, per_key_results in per_k_results.items():
+                    # mean and global metrics are likely the most important metrics,
+                    # so to make them look nicer, we drop the key "_{key}" for them
+                    # note that both are exclusive, so they will not interfere with
+                    # each other
+                    if key in ["global", "mean"]:
+                        final_key = f"{flatten_prefix}{m}@{ki}"
+                    else:
+                        final_key = f"{flatten_prefix}{m}@{ki}_{key}"
+                    final_results[final_key] = per_key_results
+    else:
+        # convert defaultdict to normal dict to make return values look cleaner
+        final_results = {k: dict(v) for k, v in metric_results.items()}
 
     if return_best_logit_indices:
-        return dict(metric_results), best_logit_indices
+        # allow reusing best loggits by returning them,
+        # e.g., to call "calculate()" another time
+        return dict(final_results), best_logit_indices
 
-    return dict(metric_results)
+    return dict(final_results)
 
 
-def _compute_raw_results(
+def _compute_user_metrics(
     metrics: Iterable[str | MetricEnum],
-    k: int,
+    k: Iterable[int],
     best_logit_indices: torch.Tensor | np.ndarray,
-    n_items: int,
     targets: torch.Tensor | np.ndarray | sp.csr_array = None,
     **kwargs,
 ):
+    """
+    Computes all user-based metrics
+
+    :param metrics:             the user-based metrics to compute
+    :param k:                   top k items to consider
+    :param best_logit_indices:  previously computed indices of the best logits in sorted order
+    :param targets:             0/1 matrix encoding true item relevance, same shape as logits
+    :param kwargs:              additional parameters that are passed to the beyond-accuracy metrics
+
+    :return: a nested dictionary with levels for the 'metrics' and 'k', returning the results
+             for individual users, e.g., {
+        "ndcg": {
+            1:  [0.41, 0.23, 0.19, 0.00, 1.00],
+            10: [0.52, 0.37, 0.14, 0.12, 0.79],
+        },
+    }
+    """
     results = {}
 
-    # compute user-based metrics
-    user_metrics_to_compute = set(metrics).intersection(set(_metric_fn_map_user))
+    # compute user-based accuracy metrics
+    user_metrics_to_compute = set(metrics).intersection(
+        set(_metric_fn_map_user_accuracy)
+    )
     if len(user_metrics_to_compute):
         results.update(
-            _compute_user_metrics(
+            _compute_user_accuracy_metrics(
                 metrics=user_metrics_to_compute,
                 k=k,
                 best_logit_indices=best_logit_indices,
@@ -767,29 +823,31 @@ def _compute_raw_results(
             )
         )
 
-    # compute distribution-based metrics
-    distribution_metrics_to_compute = set(metrics).intersection(
-        set(_metric_fn_map_distribution)
-    )
-    if len(distribution_metrics_to_compute):
-        results.update(
-            _compute_distribution_metrics(
-                metrics=distribution_metrics_to_compute,
-                best_logit_indices=best_logit_indices,
-                k=k,
-                n_items=n_items,
-            )
-        )
-
     return results
 
 
-def _compute_user_metrics(
+def _compute_user_accuracy_metrics(
     metrics: Iterable[str | MetricEnum],
-    k: int,
+    k: Iterable[int],
     best_logit_indices: torch.Tensor | np.ndarray,
     targets: torch.Tensor | np.ndarray | sp.csr_array,
 ):
+    """
+    Computes the given user-based accuracy metrics
+
+    :param metrics:             the metrics to compute
+    :param k:                   top k items to consider
+    :param best_logit_indices:  previously computed indices of the best logits in sorted order
+    :param targets:             0/1 matrix encoding true item relevance, same shape as logits
+
+    :return: a nested dictionary with levels for the 'metrics' and 'k', returning the results
+             for individual users, e.g., {
+        "ndcg": {
+            1:  [0.41, 0.23, 0.19, 0.00, 1.00],
+            10: [0.52, 0.37, 0.14, 0.12, 0.79],
+        },
+    }
+    """
     results = {}
 
     if targets is None:
@@ -799,74 +857,87 @@ def _compute_user_metrics(
     # underlying ground truth interactions
     mask = _generate_non_zero_mask(targets)
 
-    for metric in metrics:
-        # compute metrics only for users with targets
-        metric_result = _zeros_float(targets.shape[0], targets)
-        metric_result[mask] = _metric_fn_map_user[metric](
-            logits=best_logit_indices[mask],
-            targets=targets[mask],
-            k=k,
-            logits_are_top_indices=True,
-        )
-        results[str(metric)] = metric_result
+    results = defaultdict(lambda: dict())
+    for ki in k:
+        for metric in metrics:
+            # compute metrics only for users with targets
+            metric_result = _zeros_float(targets.shape[0], targets)
+            metric_result[mask] = _metric_fn_map_user_accuracy[metric](
+                logits=best_logit_indices[mask],
+                targets=targets[mask],
+                k=ki,
+                logits_are_top_indices=True,
+            )
+            results[str(metric)][ki] = metric_result
 
-    return results
+    return dict(results)
 
 
 def _compute_user_beyond_accuracy_metrics(
     metrics: Iterable[str | MetricEnum],
-    k: int,
+    k: Iterable[int],
     best_logit_indices: torch.Tensor | np.ndarray,
     **kwargs,
 ):
-    results = {}
-    for metric in metrics:
-        fn, required_params = _metric_fn_map_user_beyond_accuracy[metric]
-        results[str(metric)] = fn(
-            logits=best_logit_indices,
-            k=k,
-            logits_are_top_indices=True,
-            **{p: kwargs.get(p) for p in required_params},
-        )
-    return results
+    """
+    Computes the given user-based beyond-accuracy metrics
+
+    :param metrics:             the metrics to compute
+    :param k:                   top k items to consider
+    :param best_logit_indices:  previously computed indices of the best logits in sorted order
+    :param targets:             0/1 matrix encoding true item relevance, same shape as logits
+    :param kwargs:              additional parameters that are passed to the beyond-accuracy metrics
+
+    :return: a nested dictionary with levels for the 'metrics' and 'k', returning the results
+             for individual users, e.g., {
+        "average_rank": {
+            1:  [0.41, 0.23, 0.19, 0.00, 1.00],
+            10: [0.52, 0.37, 0.14, 0.12, 0.79],
+        },
+    }
+    """
+    results = defaultdict(lambda: dict())
+    for ki in k:
+        for metric in metrics:
+            fn, required_params = _metric_fn_map_user_beyond_accuracy[metric]
+            results[str(metric)][ki] = fn(
+                logits=best_logit_indices,
+                k=ki,
+                logits_are_top_indices=True,
+                **{p: kwargs.get(p) for p in required_params},
+            )
+    return dict(results)
 
 
-def _compute_distribution_metrics(
+def _compute_global_metrics(
     metrics: Iterable[str | MetricEnum],
-    k: int,
+    k: Iterable[int],
     best_logit_indices: torch.Tensor | np.ndarray,
     n_items: int,
 ):
-    results = {}
-    for metric in metrics:
-        results[str(metric)] = _metric_fn_map_distribution[metric](
-            logits=best_logit_indices,
-            k=k,
-            n_items=n_items,
-            logits_are_top_indices=True,
-        )
+    """
+    Computes the given global metrics
 
-    return results
+    :param metrics:             the metrics to compute
+    :param k:                   top k items to consider
+    :param best_logit_indices:  previously computed indices of the best logits in sorted order
+    :param n_items:             number of items in dataset (in case only best logit indices are supplied)
 
-
-def _aggregate_results(
-    raw_results: dict[str, torch.Tensor | np.ndarray], calculate_std: bool = False
-):
-    results = {}
-    for k, v in raw_results.items():
-        if isinstance(v, torch.Tensor):
-            results[k] = torch.mean(v).item()
-            if calculate_std:
-                results[f"{k}_std"] = torch.std(v).item()
-
-        elif isinstance(v, np.ndarray):
-            results[k] = np.mean(v).item()
-            if calculate_std:
-                # set degrees of freedom to 1 to have same results as torch
-                results[f"{k}_std"] = np.std(v, ddof=1).item()
-
-        else:
-            # nothing to do here, as global metrics are already registered as results before
-            pass
-
-    return results
+    :return: a nested dictionary with levels for the 'metrics' and 'k', returning the
+             global results, e.g., {
+                 "coverage": {
+                    1:  0.01,
+                    10: 0.21,
+                 }
+             }}
+    """
+    results = defaultdict(lambda: dict())
+    for ki in k:
+        for metric in metrics:
+            results[str(metric)][ki] = _metric_fn_map_global[metric](
+                logits=best_logit_indices,
+                k=ki,
+                n_items=n_items,
+                logits_are_top_indices=True,
+            )
+    return dict(results)
