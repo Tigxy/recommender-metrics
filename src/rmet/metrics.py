@@ -7,15 +7,15 @@ from typing import Iterable
 from collections import defaultdict
 
 from .type_helpers import (
-    _as_float,
-    _assert_supported_type,
-    _get_top_k,
-    _get_unique_values,
-    _generate_non_zero_mask,
-    _stack,
-    _std,
-    _zeros_float,
-    _zeros_like_float,
+    as_float,
+    assert_supported_type,
+    get_top_k,
+    get_unique_values,
+    generate_non_zero_mask,
+    stack,
+    std,
+    zeros_float,
+    zeros_like_float,
 )
 
 
@@ -50,7 +50,7 @@ def _get_relevancy_scores(
             return scores.todense()
         return scores
     else:
-        _assert_supported_type(targets)
+        assert_supported_type(targets)
 
 
 def _get_top_k_relevancies(
@@ -60,7 +60,7 @@ def _get_top_k_relevancies(
     logits_are_top_indices: bool = False,
     sorted: bool = True,
 ):
-    top_indices = _get_top_k(logits, k, logits_are_top_indices, sorted=sorted)
+    top_indices = get_top_k(logits, k, logits_are_top_indices, sorted=sorted)
     return _get_relevancy_scores(targets, top_indices)
 
 
@@ -103,9 +103,9 @@ def dcg(
         discount = 1 / np.log2(np.arange(1, k + 1) + 1)
 
     else:
-        _assert_supported_type(relevancy_scores)
+        assert_supported_type(relevancy_scores)
 
-    return _as_float(relevancy_scores) @ discount
+    return as_float(relevancy_scores) @ discount
 
 
 def ndcg(
@@ -177,7 +177,7 @@ def recall(
 
     # may happen that there are no relevant true items, cover this possible DivisionByZero case.
     mask = n_total_relevant != 0
-    recall = _zeros_like_float(n_relevant_items)
+    recall = zeros_like_float(n_relevant_items)
     recall[mask] = n_relevant_items[mask] / n_total_relevant[mask]
     return recall
 
@@ -203,7 +203,7 @@ def f_score(
 
     pr = p + r
     mask = pr != 0
-    f_score = _zeros_like_float(r)
+    f_score = zeros_like_float(r)
     f_score[mask] = 2 * ((p * r)[mask] / pr[mask])
     return f_score
 
@@ -227,7 +227,7 @@ def hitrate(
     n_relevant_items = _get_n_top_k_relevant(
         logits, targets, k, logits_are_top_indices, sorted=False
     )
-    return _as_float(n_relevant_items.clip(max=1))
+    return as_float(n_relevant_items.clip(max=1))
 
 
 def average_precision(
@@ -250,10 +250,10 @@ def average_precision(
     if k <= 0:
         raise ValueError("k is required to be positive!")
 
-    top_indices = _get_top_k(logits, k, logits_are_top_indices, sorted=True)
+    top_indices = get_top_k(logits, k, logits_are_top_indices, sorted=True)
     n_total_relevant = targets.sum(-1)
 
-    total_precision = _zeros_like_float(n_total_relevant)
+    total_precision = zeros_like_float(n_total_relevant)
     for ki in range(1, k + 1):
         # relevance of k'th indices (for -1 see offset in range)
         position_relevance = _get_relevancy_scores(
@@ -267,7 +267,7 @@ def average_precision(
     # may happen that there are no relevant true items, cover this possible DivisionByZero case.
     mask = n_total_relevant != 0
 
-    avg_precision = _zeros_like_float(n_total_relevant)
+    avg_precision = zeros_like_float(n_total_relevant)
     avg_precision[mask] = total_precision[mask] / n_total_relevant[mask]
 
     return avg_precision
@@ -315,7 +315,7 @@ def reciprocal_rank(
         ).flatten()
         max_indices = max_indices.flatten()
     else:
-        _assert_supported_type(relevancy_scores)
+        assert_supported_type(relevancy_scores)
 
     # mask to indicate which 'hits' are actually true
     # (if there are no hits at all for some items)
@@ -324,7 +324,7 @@ def reciprocal_rank(
     # by default, assume reciprocal rank of 0 for all users,
     # which is the case if there is no match in the recommendations,
     # i.e., if lim k->inf, 1/k->0
-    rr = _zeros_like_float(max_values)
+    rr = zeros_like_float(max_values)
 
     denominator = max_indices[mask] + 1
     if isinstance(denominator, torch.Tensor):
@@ -382,16 +382,16 @@ def average_rank(
         if is_tensor_targets:
             item_ranks = torch.tensor(item_ranks, device=targets.device)
 
-    top_indices = _get_top_k(logits, k, logits_are_top_indices, sorted=False)
+    top_indices = get_top_k(logits, k, logits_are_top_indices, sorted=False)
 
     # gather item ranks and average them for each user individually (gather requires matching shapes)
     # this does drop the gradient, but shouldn't be relevant for evaluation metrics
     # another solution would be to gather on item_ranks.repeat((batch_size, 1)), which
     # would allocate more memory
     individual_results = [
-        _as_float(_get_relevancy_scores(item_ranks, ti)).mean(-1) for ti in top_indices
+        as_float(_get_relevancy_scores(item_ranks, ti)).mean(-1) for ti in top_indices
     ]
-    individual_results = _stack(individual_results)
+    individual_results = stack(individual_results)
     return individual_results
 
 
@@ -416,10 +416,10 @@ def coverage(
     if not logits_are_top_indices:
         n_items = logits.shape[-1]
 
-    top_indices = _get_top_k(
+    top_indices = get_top_k(
         logits, k, logits_are_top_indices=logits_are_top_indices, sorted=False
     )
-    unique_values = _get_unique_values(top_indices[:, :k])
+    unique_values = get_unique_values(top_indices[:, :k])
     n_unique_recommended_items = unique_values.shape[0]
     return n_unique_recommended_items / n_items
 
@@ -540,7 +540,7 @@ def calculate(
     n_items = n_items or logits.shape[-1]
     # to speed up computations, only retrieve highest logit indices once (if not already supplied)
     if best_logit_indices is None:
-        best_logit_indices = _get_top_k(
+        best_logit_indices = get_top_k(
             logits, max_k, logits_are_top_indices=False, sorted=True
         )
 
@@ -563,7 +563,7 @@ def calculate(
             if return_aggregated:
                 metric_results[m][ki]["mean"] = per_k_results.mean().item()
                 if calculate_std:
-                    metric_results[m][ki]["std"] = _std(per_k_results)
+                    metric_results[m][ki]["std"] = std(per_k_results)
 
     # compute global-based metrics
     global_results = _compute_global_metrics(
@@ -691,13 +691,13 @@ def _compute_user_accuracy_metrics(
 
     # do not compute metrics for users where we do not have any
     # underlying ground truth interactions
-    mask = _generate_non_zero_mask(targets)
+    mask = generate_non_zero_mask(targets)
 
     results = defaultdict(lambda: dict())
     for ki in k:
         for metric in metrics:
             # compute metrics only for users with targets
-            metric_result = _zeros_float(targets.shape[0], targets)
+            metric_result = zeros_float(targets.shape[0], targets)
             metric_result[mask] = _metric_fn_map_user_accuracy[metric](
                 logits=best_logit_indices[mask],
                 targets=targets[mask],

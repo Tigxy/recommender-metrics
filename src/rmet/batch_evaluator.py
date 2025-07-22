@@ -15,7 +15,7 @@ from .metrics import (
 )
 
 from .type_helpers import (
-    _std,
+    std,
 )
 
 
@@ -228,7 +228,7 @@ class BatchEvaluator:
             }
             if self.calculate_std:
                 aggregated_results.update(
-                    {f"{k}_std": _std(v) for k, v in user_level_results.items()}
+                    {f"{k}_std": std(v) for k, v in user_level_results.items()}
                 )
 
         # calculate distribution metrics

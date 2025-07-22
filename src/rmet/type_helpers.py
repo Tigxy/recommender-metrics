@@ -4,12 +4,12 @@ import scipy.sparse as sp
 from typing import Iterable
 
 
-def _assert_supported_type(a: any):
+def assert_supported_type(a: any):
     if not isinstance(a, (np.ndarray, torch.Tensor, sp.csr_array)):
         raise TypeError(f"Type {type(a)} of input not supported.")
 
 
-def _zeros_like_float(a: torch.Tensor | np.ndarray):
+def zeros_like_float(a: torch.Tensor | np.ndarray):
     if isinstance(a, torch.Tensor):
         return torch.zeros_like(a, dtype=torch.float, device=a.device)
 
@@ -17,20 +17,20 @@ def _zeros_like_float(a: torch.Tensor | np.ndarray):
         return np.zeros_like(a, dtype=float)
 
     else:
-        _assert_supported_type(a)
+        assert_supported_type(a)
 
 
-def _zeros_float(shape, reference_a):
+def zeros_float(shape, reference_a):
     if isinstance(reference_a, torch.Tensor):
         return torch.zeros(shape, device=reference_a.device)
 
     elif isinstance(reference_a, np.ndarray | sp.csr_array):
         return np.zeros(shape)
     else:
-        _assert_supported_type(reference_a)
+        assert_supported_type(reference_a)
 
 
-def _as_float(a: torch.Tensor | np.ndarray):
+def as_float(a: torch.Tensor | np.ndarray):
     if isinstance(a, torch.Tensor):
         return a.float()
 
@@ -38,10 +38,10 @@ def _as_float(a: torch.Tensor | np.ndarray):
         return a.astype(float)
 
     else:
-        _assert_supported_type(a)
+        assert_supported_type(a)
 
 
-def _stack(a: Iterable[np.ndarray] | Iterable[torch.Tensor]):
+def stack(a: Iterable[np.ndarray] | Iterable[torch.Tensor]):
     if len(a) == 0:
         raise ValueError("Cannot perform stack on empty iterable.")
 
@@ -51,7 +51,7 @@ def _stack(a: Iterable[np.ndarray] | Iterable[torch.Tensor]):
         return np.stack(a)
 
 
-def _generate_non_zero_mask(a: torch.Tensor | np.ndarray, dim=-1):
+def generate_non_zero_mask(a: torch.Tensor | np.ndarray, dim=-1):
     non_zero_counter = a.sum(-1)
 
     if isinstance(non_zero_counter, torch.Tensor):
@@ -61,10 +61,10 @@ def _generate_non_zero_mask(a: torch.Tensor | np.ndarray, dim=-1):
         return np.argwhere(non_zero_counter).flatten()
 
     else:
-        _assert_supported_type(non_zero_counter)
+        assert_supported_type(non_zero_counter)
 
 
-def _get_unique_values(top_indices: torch.Tensor | np.ndarray):
+def get_unique_values(top_indices: torch.Tensor | np.ndarray):
     if isinstance(top_indices, torch.Tensor):
         return top_indices.unique(sorted=False)
 
@@ -72,10 +72,10 @@ def _get_unique_values(top_indices: torch.Tensor | np.ndarray):
         return np.unique(top_indices)
 
     else:
-        _assert_supported_type(top_indices)
+        assert_supported_type(top_indices)
 
 
-def _std(a: torch.Tensor | np.ndarray):
+def std(a: torch.Tensor | np.ndarray):
     if isinstance(a, torch.Tensor):
         return torch.std(a).item()
 
@@ -84,7 +84,7 @@ def _std(a: torch.Tensor | np.ndarray):
         return np.std(a, ddof=1).item()
 
     else:
-        _assert_supported_type(top_indices)
+        assert_supported_type(top_indices)
 
 
 def _get_top_k_numpy(a: np.ndarray, k: int, sorted: bool = True):
@@ -149,7 +149,7 @@ def _get_top_k_sparse(a: sp.csr_array, k: int):
     return top_k_indices
 
 
-def _get_top_k(
+def get_top_k(
     logits: torch.Tensor | np.ndarray | sp.csr_array,
     k=10,
     logits_are_top_indices: bool = False,
@@ -177,4 +177,4 @@ def _get_top_k(
             return _get_top_k_sparse(logits, k)
 
         else:
-            _assert_supported_type(logits)
+            assert_supported_type(logits)
