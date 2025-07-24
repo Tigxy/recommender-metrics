@@ -1,4 +1,5 @@
 import numpy as np
+from warnings import warn
 
 
 class UserFeature:
@@ -10,6 +11,11 @@ class UserFeature:
         :param name: The name of the feature.
         :param labels: The labels for the individual users of the feature. The users are grouped based on them.
         """
+        warn(
+            f"{self.__class__.__name__} is deprecated. Please use `rmet.groups.calculate_per_group` instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
         self.name = name
         self.labels = labels
