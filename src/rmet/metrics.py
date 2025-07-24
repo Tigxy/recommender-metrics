@@ -465,6 +465,7 @@ def calculate(
     calculate_std: bool = False,
     flatten_results: bool = False,
     flatten_prefix: str = "",
+    flatten_suffix: str = "",
     n_items: int = None,
     best_logit_indices: torch.Tensor | np.ndarray = None,
     return_best_logit_indices: bool = False,
@@ -484,6 +485,7 @@ def calculate(
     :param flatten_results:     whether to flatten the results' dictionary.
     :param flatten_prefix:      prefix to use for flattened results, e.g., to differentiate between
                                 different splits
+    :param flatten_suffix:      suffix to use for flattened results
     :param n_items:             number of items in dataset (in case only best logit indices are supplied)
     :param best_logit_indices:  previously computed indices of the best logits in sorted order
     :param return_best_logit_indices:   whether to return the indices of the best logits
@@ -496,8 +498,9 @@ def calculate(
              - "std":    ..., # for user-based metrics if 'return_aggregated' and 'calculate_std'
              - "global": ..., # for global metrics
              or a nested dictionary with keys in the format
-             - `{flatten_prefix}{metric}@{k}`        # for "mean" and "global" keys due to their importance
-             - `{flatten_prefix}{metric}@{k}_{key}`  # for "std" and "user" keys
+             - `{flatten_prefix}{metric}@{k}{flatten_suffix}`        # for "mean" and "global" keys
+                                                                     # due to their importance
+             - `{flatten_prefix}{metric}@{k}_{key}{flatten_suffix}`  # for "std" and "user" keys
     """
 
     k = (k,) if isinstance(k, int) else k
@@ -588,9 +591,9 @@ def calculate(
                     # note that both are exclusive, so they will not interfere with
                     # each other
                     if key in ["global", "mean"]:
-                        final_key = f"{flatten_prefix}{m}@{ki}"
+                        final_key = f"{flatten_prefix}{m}@{ki}{flatten_suffix}"
                     else:
-                        final_key = f"{flatten_prefix}{m}@{ki}_{key}"
+                        final_key = f"{flatten_prefix}{m}@{ki}_{key}{flatten_suffix}"
                     final_results[final_key] = per_key_results
     else:
         # convert defaultdict to normal dict to make return values look cleaner

@@ -1,9 +1,23 @@
 # Recommender metrics
 
-This is a collection of commonly used recommendation system (RS) metrics. 
-As fairness in RS is becoming increasingly important, it is also extended by 
-functions to ease computing the differences of RS performances for different 
-user groups, e.g., gender.
+This library is a colletion of common recommender system (RS) evaluation metrics. Moreover, as RS might perform differently for different user groups due to limitations in available data, this library supports the out-of-the-box computations for subsets of users.
+
+## Table of Contents
+- [Recommender metrics](#recommender-metrics)
+  - [Table of Contents](#table-of-contents)
+  - [Metrics Overview](#metrics-overview)
+  - [Installation](#installation)
+  - [Usage](#usage)
+    - [Single computations](#single-computations)
+    - [Multiple metrics and thresholds](#multiple-metrics-and-thresholds)
+    - [Computations per user group](#computations-per-user-group)
+    - [Batch-wise evaluation](#batch-wise-evaluation)
+      - [Overall computation](#overall-computation)
+      - [Including user groups](#including-user-groups)
+    - [\[Deprecated\] Usage metric differences for user features](#deprecated-usage-metric-differences-for-user-features)
+  - [License](#license)
+
+## Metrics Overview
 
 The following metrics are supported (all with the cut-off threshold `k`):
 - [DCG](https://en.wikipedia.org/wiki/Discounted_cumulative_gain#Discounted_Cumulative_Gain)
@@ -31,18 +45,26 @@ which are often used in research.*
 - Or from source:
 ```python -m pip install .```
 
-## Usage metrics
+## Usage
+There are different ways to compute metrics. In the following, we are going to list all of them.
 
-To compute the metrics, simply call them with your model's output, the
-true (known) interactions and some cut-off value `k`:
+### Single computations
+
+To compute individual metrics, simply import and call them with your model's output (the logits), the true (known) interactions and some cut-off value `k`:
 ```py
 from rmet import ndcg
 ndcg(model_output, targets, k=10)
 ```
+Sample output:
+```
+0.033423
+```
+
 Note: `Coverage` does not require the `targets` attribute.
 
-To compute multiple metrics with a single call, check out the `calculate` function,
-which accepts a list of metrics to compute:
+### Multiple metrics and thresholds
+
+You can also call calculate multiple metrics and thresholds efficiently with a single function call. To do so, check out the `calculate` function:
 ```py
 from rmet import calculate
 
@@ -50,27 +72,139 @@ calculate(
     metrics=["ndcg", "recall"], 
     logits=model_output, 
     targets=targets, 
-    k=10,
+    k=[10, 50],
     return_individual=False,
     flatten_results=True,
 )
 ```
 
 Sample output:
-```
+```yaml
 {
  'ndcg@10': 0.479,
- 'recall@10': 0.350
+ 'ndcg@50': 0.5,
+ 'recall@10': 0.350,
+ 'recall@50': 0.363
 }
 ```
 
-If `return_individual` is set, the metrics are also returned on sample level, e.g., for every user, when possible. 
+If `return_individual` is set, the metrics are also returned on sample level, e.g., for every user, when possible.
 
-Further, `calculate` allows the efficient computation of metrics for multiple cutoff thresholds `k`, by simply providing a list of numbers instead.
+Please check out the functions docstring for the full feature description and its extended functionality.
 
-Please check out the functions docstring for the full feature description.
+### Computations per user group
 
-## Usage metric differences for user features
+If you want to get insights into the performance of different user groups, e.g., to study differences in recommendation performance based on the users' countries of origin, check out the `calculate_per_group` function:
+
+```py
+from rmet import calculate_per_group
+
+# your actual groups as an iterable, e.g., list or pd.Series
+group_assignment = ["AT", "DE", "FR", ...] 
+
+calculate_per_group(
+    group_name="country",
+    group_assignment=group_assignment,
+    metrics=["ndcg", "recall"], 
+    logits=model_output, 
+    targets=targets, 
+    k=[10],
+    return_individual=False,
+    flatten_results=True,
+)
+```
+
+Sample output:
+```yaml
+{
+ 'ndcg@10/country_AT': 0.173,
+ 'ndcg@10/country_DE': 0.199,
+ 'ndcg@10/country_FR': 0.239,
+ 'recall@10/country_AT': 0.282,
+ 'recall@10/country_DE': 0.301,
+ 'recall@10/country_FR': 0.357,
+}
+```
+
+### Batch-wise evaluation
+For big datasets and real-world applications, gathering all the logits and targets before computing the recommendation metrics may be too resource-intensive. To simplify calculations in such scenarios, we provide `BatchEvaluator`, a class that evaluates and stores intermediary results.
+
+#### Overall computation
+
+```py
+from rmet import BatchEvaluator
+
+# instantiate the evaluator class
+batch_evaluator = BatchEvaluator(
+    metrics=["ndcg"],
+    top_k=[10],
+)
+
+# iterate over the batches
+for batch in batches:
+    user_indices, logits, targets = batch
+
+    # you need to call 'eval_batch' for each batch
+    batch_evaluator.eval_batch(
+        user_indices=user_indices
+        logits=logits,
+        targets=targets,
+    )
+
+# use 'get_results' to determine the final results
+batch_evaluator.get_results()
+```
+Sample output:
+```yaml
+{
+ 'ndcg@10': 0.121,
+}
+```
+
+#### Including user groups
+
+`BatchEvaluator.eval_batch()` also accepts group assignments as input, which allows the computation of metrics on group and global level. 
+```py
+from rmet import BatchEvaluator
+
+# instantiate the evaluator class
+batch_evaluator = BatchEvaluator(
+    metrics=["ndcg"],
+    top_k=[10],
+)
+
+# iterate over the batches
+for batch in batches:
+    # batch also returns group_assignments, which is 
+    # a mapping from group_name to their values, e.g.,
+    # {"country": ["AT", "DE", ...], "gender": ["m", "n", ...]} 
+    user_indices, logits, targets, group_assignments = batch
+
+    # you need to call 'eval_batch' for each batch
+    batch_evaluator.eval_batch(
+        user_indices=user_indices
+        logits=logits,
+        targets=targets,
+        group_assignments=group_assignments,
+    )
+
+# use 'get_results' to determine the final results
+batch_evaluator.get_results()
+```
+Sample output:
+```yaml
+{
+ 'ndcg@10': 0.121,
+ 'ndcg@10/country_AT': 0.115,
+ 'ndcg@10/country_DE': 0.142,
+ 'ndcg@10/gender_m': 0.087,
+ 'ndcg@10/gender_f': 0.156,
+}
+```
+
+### [Deprecated] Usage metric differences for user features
+
+**[NOTE] This feature is deprecated, use `calculate_per_group` and the `BatchEvaluator` with group_assignments instead.**
 
 One can also instantiate the `UserFeature` class for some demographic user feature,
 such that the performance difference of RS on for different users can be 

@@ -21,9 +21,10 @@ from rmet.metrics import (
 )
 
 from rmet.batch_evaluator import BatchEvaluator, EvaluatorResults
+from rmet.type_helpers import std
 
 
-class TestRecommenderMetricsTorch(unittest.TestCase):
+class TestRecommenderMetrics(unittest.TestCase):
 
     def setUp(self):
         # top-k: [0, 1, 3], [3, 4, 2]
@@ -297,6 +298,7 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
     def test_compute_flattened(self):
 
         prefix = "<my-prefix>/"
+        suffix = "/<my-suffix>"
 
         for _, fn_lookup in self.supported_types.items():
             result = calculate(
@@ -309,6 +311,7 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
                 calculate_std=True,
                 flatten_results=True,
                 flatten_prefix=prefix,
+                flatten_suffix=suffix,
                 n_items=None,
                 best_logit_indices=None,
                 return_best_logit_indices=False,
@@ -318,11 +321,11 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
             expected = dict()
             for m, k in self.user_computation_results.items():
                 metric_name = f"{prefix}{m}@{self.k}"
-                expected[f"{metric_name}_user"] = fn_lookup["cast-result"](k)
-                expected[metric_name] = np.mean(k).item()
+                expected[f"{metric_name}_user" + suffix] = fn_lookup["cast-result"](k)
+                expected[metric_name + suffix] = np.mean(k).item()
                 # ddof to adjust to degrees of freedom = 1 for std computation in PyTorch
-                expected[f"{metric_name}_std"] = np.std(k, ddof=1).item()
-            expected.update({f"{prefix}coverage@{self.k}": self.coverage})
+                expected[f"{metric_name}_std" + suffix] = np.std(k, ddof=1).item()
+            expected.update({f"{prefix}coverage@{self.k}{suffix}": self.coverage})
 
             self._assert_dictionary_equality(result, expected, fn_lookup["all_close"])
 
@@ -454,15 +457,14 @@ class TestRecommenderMetricsTorch(unittest.TestCase):
                 user_top_k=None,
             )
 
-            for m, k in self.user_computation_results.items():
+            for m, m_result in self.user_computation_results.items():
                 metric_name = f"{m}@{self.k}"
-                expected.user_level_metrics[metric_name] = np.array(k)
-                expected.aggregated_metrics[metric_name] = np.mean(k).item()
+                m_result = fn_lookup["cast-result"](m_result)
+                expected.user_level_metrics[metric_name] = m_result
+                expected.aggregated_metrics[metric_name] = m_result.mean().item()
                 # ddof to adjust to degrees of freedom = 1 for std computation in PyTorch,
                 # as we want to have the same results between NumPy and PyTorch
-                expected.aggregated_metrics[metric_name + "_std"] = np.std(
-                    k, ddof=1
-                ).item()
+                expected.aggregated_metrics[metric_name + "_std"] = std(m_result)
             expected.aggregated_metrics.update({f"coverage@{self.k}": self.coverage})
 
             self._assert_dictionary_equality(

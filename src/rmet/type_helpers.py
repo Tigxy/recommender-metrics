@@ -64,9 +64,9 @@ def generate_non_zero_mask(a: torch.Tensor | np.ndarray, dim=-1):
         assert_supported_type(non_zero_counter)
 
 
-def get_unique_values(top_indices: torch.Tensor | np.ndarray):
+def get_unique_values(top_indices: torch.Tensor | np.ndarray, sorted=False):
     if isinstance(top_indices, torch.Tensor):
-        return top_indices.unique(sorted=False)
+        return top_indices.unique(sorted=sorted)
 
     elif isinstance(top_indices, np.ndarray):
         return np.unique(top_indices)
