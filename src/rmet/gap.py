@@ -1,4 +1,4 @@
-from collections import defaultdict
+from warnings import warn
 
 import torch
 import itertools
@@ -9,26 +9,6 @@ from .metrics import calculate, MetricEnum
 
 def __mean(v):
     return torch.mean(v).item() if isinstance(v, torch.Tensor) else v
-
-
-# def calculate(metrics: tuple, logits: torch.Tensor, targets=None, k: Union[int, list] = 10,
-#               return_aggregated: bool = True, return_individual: bool = False,
-#               flatten_results: bool = False, flattened_results_prefix: str = ""):
-#     """
-#     Computes the values for a given list of metrics.
-#
-#     :param metrics: The list of metrics to compute. Check out 'supported_metrics' for a list of names.
-#     :param logits: prediction matrix about item relevance
-#     :param targets: 0/1 matrix encoding true item relevance, same shape as logits
-#     :param k: top k items to consider
-#     :param return_aggregated: Whether aggregated metric results should be returned.
-#     :param return_individual: Whether the results for individual users should be returned
-#     :param flatten_results: Whether to flatten the results' dictionary. Key is of format "{prefix}{metric}@{k}"
-#     :param flattened_results_prefix: Prefix to prepend to the flattened results key.
-#     :return: a dictionary containing ...
-#         {metric_name: value} if 'return_aggregated=True', and/or
-#         {<metric_name>_individual: list_of_values} if 'return_individual=True'
-#     """
 
 
 def _calculate_for_feature(
@@ -54,6 +34,11 @@ def _calculate_for_feature(
     :return: A dictionary of metrics computed for the individual user groups, and their pairwise differences
      in the form of {metric_name: value} pairs.
     """
+    warn(
+        "This method is deprecated. Please use `rmet.groups.calculate_per_group` instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
     results = {}
 
@@ -61,7 +46,7 @@ def _calculate_for_feature(
     for lbl, indices in group:
         t = targets[indices] if targets is not None else None
         results[f"{group.name}_{lbl}"] = calculate(
-            metrics, logits[indices], t, k, return_individual=return_individual
+            metrics, logits[indices], t, k, return_per_user=return_individual
         )
 
     pairs = list(itertools.combinations(group.unique_labels, 2))
@@ -118,13 +103,19 @@ def calculate_for_feature(
     :return: A dictionary of metrics computed for the individual user groups, and their pairwise differences
      in the form of {metric_name: value} pairs.
     """
+    warn(
+        "This method is deprecated. Please use `rmet.groups.calculate_per_group` instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     results = dict()
 
     # calculate metrics for users of a single feature
     for lbl, indices in group:
         t = targets[indices] if targets is not None else None
         results[f"{group.name}_{lbl}"] = calculate(
-            metrics, logits[indices], t, k, return_individual=return_individual
+            metrics, logits[indices], t, k, return_per_user=return_individual
         )
 
     # calculate the differences between features

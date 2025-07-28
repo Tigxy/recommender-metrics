@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rmet"
-version = "0.1.5"
+version = "0.1.6"
 authors = [
     { name = "Christian Ganhör", email="author@example.com" }
 ]
@@ -20,7 +20,8 @@ classifiers = [
 
 dependencies = [
     "numpy", 
-    "scipy"
+    "scipy",
+    "natsort"
 ]
 
 [project.urls]
