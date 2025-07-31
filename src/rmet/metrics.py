@@ -391,6 +391,12 @@ def average_rank(
     individual_results = [
         as_float(_get_relevancy_scores(item_ranks, ti)).mean(-1) for ti in top_indices
     ]
+
+    if len(individual_results) == 0:
+        if isinstance(top_indices, torch.Tensor):
+            return torch.tensor([], dtype=float)
+        else:
+            return np.array([], dtype=float)
     individual_results = stack(individual_results)
     return individual_results
 
