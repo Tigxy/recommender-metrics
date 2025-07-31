@@ -303,7 +303,12 @@ class BatchEvaluator:
 
             # aggregate the results
             aggregated_results = {
-                k: v.mean().item() for k, v in user_level_results.items()
+                k: (
+                    v.mean().item()
+                    if len(v) > 0
+                    else (np.nan if isinstance(user_top_k, np.ndarray) else torch.nan)
+                )
+                for k, v in user_level_results.items()
             }
 
             if self.calculate_std:
